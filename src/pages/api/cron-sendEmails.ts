@@ -22,6 +22,16 @@ function getWarmupLimit(daysActive: number): number {
   return 50;
 }
 
+type SenderQuota = {
+  email: string;
+  display_name: string | null;
+  remaining: number;
+  smtpHost?: string | null;
+  smtpPort?: number | null;
+  smtpUser?: string | null;
+  smtpPass?: string | null;
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const auth = req.headers.authorization;
   if (!auth || auth !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -41,9 +51,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ message: "No active sender accounts", sent: 0 });
     }
 
-    const senderQuotas: {
-      [id: string]: { email: string; display_name: string | null; remaining: number };
-    } = {};
+    const senderQuotas: { [id: string]: SenderQuota } = {};
 
     for (const s of senders) {
       const warmupStart = s.warmup_start_date
@@ -70,6 +78,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         email: s.email,
         display_name: s.display_name,
         remaining,
+        // ⬇️ SMTP per inbox uit de database (valt terug op env als leeg)
+        smtpHost: s.smtp_host ?? null,
+        smtpPort: s.smtp_port ?? null,
+        smtpUser: s.smtp_user ?? null,
+        smtpPass: s.smtp_pass ?? null,
       };
     }
 
@@ -107,21 +120,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     for (const mail of toSend) {
       let attempts = 0;
       let senderId = senderIds[senderIndex];
-      while (senderQuotas[senderId].remaining <= 0 && attempts < senderIds.length) {
+
+      while (
+        senderQuotas[senderId].remaining <= 0 &&
+        attempts < senderIds.length
+      ) {
         senderIndex = (senderIndex + 1) % senderIds.length;
         senderId = senderIds[senderIndex];
         attempts++;
       }
+
       const sender = senderQuotas[senderId];
       if (!sender || sender.remaining <= 0) break;
 
       try {
+        // ⬇️ SMTP-config per inbox: valt terug op env als db-veld leeg is
+        const smtpConfig = {
+          host: sender.smtpHost || process.env.SMTP_HOST,
+          port: sender.smtpPort || Number(process.env.SMTP_PORT || 587),
+          user: sender.smtpUser || process.env.SMTP_USER,
+          pass: sender.smtpPass || process.env.SMTP_PASS,
+        };
+
         await sendEmail(
           mail.to_email,
           mail.subject,
           mail.body,
           sender.email,
-          sender.display_name || undefined
+          sender.display_name || undefined,
+          smtpConfig
         );
 
         await supabaseAdmin
