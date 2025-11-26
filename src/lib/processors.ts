@@ -18,7 +18,7 @@ export async function processGenerateEmailJob(job: MarketingJob) {
   const lead = leadData as Lead;
 
   const payload = job.payload || {};
-  const language: "nl" | "en" = payload.language || "nl";
+  const language: "nl" | "en" = payload.language || "en";
 
   const { subject, body } = await generateSalesEmail({
     language,
