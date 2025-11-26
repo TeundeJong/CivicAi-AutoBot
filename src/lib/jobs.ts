@@ -1,14 +1,22 @@
 export type JobType =
   | "GENERATE_EMAIL"
-  | "GENERATE_LINKEDIN_DM"
-  | "GENERATE_LINKEDIN_POST"
-  | "GENERATE_LAUNCH_COPY";
-
-export type JobStatus = "pending" | "processing" | "done" | "failed";
+  | "GENERATE_LINKEDIN_DM";
 
 export interface MarketingJobPayload {
-  campaignName?: string;
   language?: "nl" | "en";
-  channel?: "email" | "linkedin" | "launch";
+  campaignName?: string;
+  subject?: string;
   extraContext?: string;
+  autoApprove?: boolean;
+}
+
+export interface MarketingJob {
+  id: string;
+  type: JobType;
+  status: "pending" | "processing" | "done" | "failed";
+  payload: MarketingJobPayload | null;
+  lead_id: string | null;
+  attempts: number;
+  created_at: string;
+  updated_at: string | null;
 }
