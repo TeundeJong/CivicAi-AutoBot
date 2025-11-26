@@ -1,172 +1,103 @@
-import { useEffect, useState } from "react";
+// src/pages/index.tsx
 import Link from "next/link";
 
-interface Job {
-  id: string;
-  type: string;
-  status: string;
-  created_at: string;
-  updated_at: string | null;
-}
-
 export default function HomePage() {
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    async function fetchJobs() {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/jobs/list");
-        const json = await res.json();
-        setJobs(json.jobs ?? []);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchJobs();
-  }, []);
-
   return (
-    <main
+    <div
       style={{
-        minHeight: "100vh",
-        background: "#020617",
-        color: "#e5e7eb",
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1.3fr)",
+        gap: "2.5rem",
+        alignItems: "center",
       }}
     >
-      {/* Top navigation bar */}
-      <div
-        style={{
-          borderBottom: "1px solid #1f2937",
-          background: "#020617",
-        }}
-      >
-        <div
+      <section>
+        <p
           style={{
-            maxWidth: 900,
-            margin: "0 auto",
-            padding: "0.75rem 1rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "0.75rem",
+            fontSize: "0.8rem",
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: "#a5b4fc",
+            marginBottom: "0.5rem",
           }}
         >
-          <div style={{ fontSize: "0.875rem", color: "#9ca3af" }}>
-            CivicAi Autobot · <span style={{ color: "#e5e7eb" }}>Console</span>
-          </div>
-          <nav style={{ display: "flex", gap: "0.5rem", fontSize: "0.875rem" }}>
-            <Link
-              href="/"
-              style={{
-                padding: "0.4rem 0.8rem",
-                borderRadius: "999px",
-                background: "#111827",
-                color: "#e5e7eb",
-                textDecoration: "none",
-              }}
-            >
-              Jobs
-            </Link>
-            <Link
-              href="/dashboard"
-              style={{
-                padding: "0.4rem 0.8rem",
-                borderRadius: "999px",
-                background: "#0284c7",
-                color: "#f9fafb",
-                textDecoration: "none",
-              }}
-            >
-              Email dashboard
-            </Link>
-            {/* Later kun je hier meer toevoegen, bv:
-            <Link href="/social" ...>Social posts</Link>
-            <Link href="/dms" ...>DM overview</Link>
-            */}
-          </nav>
-        </div>
-      </div>
-
-      {/* Page content */}
-      <div
-        style={{
-          maxWidth: 900,
-          margin: "0 auto",
-          padding: "2.5rem 1rem",
-        }}
-      >
-        <h1 style={{ fontSize: "2rem", fontWeight: 700, marginBottom: "1rem" }}>
-          CivicAi Autobot – Job Queue
+          CivicAi Autobot v3
+        </p>
+        <h1
+          style={{
+            fontSize: "2.4rem",
+            lineHeight: 1.1,
+            fontWeight: 800,
+            marginBottom: "1rem",
+          }}
+        >
+          Jouw AI sales assistent,
+          <br />
+          zonder spamgedrag.
         </h1>
-        <p style={{ marginBottom: "1.5rem", color: "#9ca3af" }}>
-          Simpele view om te zien welke AI-jobs in de rij staan.
+        <p style={{ color: "#9ca3af", marginBottom: "1.5rem", maxWidth: 520 }}>
+          Genereer batches e-mails, keur ze zelf goed en laat de bot ze{" "}
+          <strong>netjes gedoseerd</strong> versturen vanaf vier inboxen. Plus
+          LinkedIn-content en DM-concepten in de planning.
         </p>
 
-        {loading && <p>Loading...</p>}
+        <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1.5rem" }}>
+          <Link href="/dashboard" legacyBehavior>
+            <a
+              style={{
+                padding: "0.7rem 1.2rem",
+                borderRadius: "999px",
+                background:
+                  "linear-gradient(135deg,#6366f1,#8b5cf6,#ec4899)",
+                fontWeight: 600,
+              }}
+            >
+              Open dashboard
+            </a>
+          </Link>
+        </div>
 
-        {!loading && (
-          <table
-            style={{
-              width: "100%",
-              fontSize: "0.875rem",
-              borderCollapse: "collapse",
-            }}
-          >
-            <thead>
-              <tr
-                style={{
-                  background: "#020617",
-                  borderBottom: "1px solid #1f2937",
-                }}
-              >
-                <th style={{ textAlign: "left", padding: "0.5rem" }}>Type</th>
-                <th style={{ textAlign: "left", padding: "0.5rem" }}>Status</th>
-                <th style={{ textAlign: "left", padding: "0.5rem" }}>
-                  Created
-                </th>
-                <th style={{ textAlign: "left", padding: "0.5rem" }}>
-                  Updated
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((job) => (
-                <tr
-                  key={job.id}
-                  style={{ borderBottom: "1px solid #1f2937" }}
-                >
-                  <td style={{ padding: "0.5rem" }}>{job.type}</td>
-                  <td style={{ padding: "0.5rem" }}>{job.status}</td>
-                  <td style={{ padding: "0.5rem" }}>
-                    {job.created_at
-                      ? new Date(job.created_at).toLocaleString()
-                      : "-"}
-                  </td>
-                  <td style={{ padding: "0.5rem" }}>
-                    {job.updated_at
-                      ? new Date(job.updated_at).toLocaleString()
-                      : "-"}
-                  </td>
-                </tr>
-              ))}
-              {jobs.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={4}
-                    style={{ padding: "0.75rem", color: "#6b7280" }}
-                  >
-                    Nog geen jobs gevonden.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </main>
+        <ul
+          style={{
+            fontSize: "0.9rem",
+            color: "#9ca3af",
+            lineHeight: 1.6,
+          }}
+        >
+          <li>• E-mails gegenereerd met OpenAI, per lead</li>
+          <li>• Jij approve’t, de bot verstuurt netjes binnen limieten</li>
+          <li>• Overzicht per mailbox: limiet, verstuurd, resterend</li>
+        </ul>
+      </section>
+
+      <section
+        style={{
+          borderRadius: "1rem",
+          border: "1px solid #1f2933",
+          padding: "1.25rem 1.4rem",
+          background:
+            "radial-gradient(circle at top, #111827, #020617 60%)",
+        }}
+      >
+        <p style={{ fontSize: "0.8rem", color: "#9ca3af", marginBottom: "0.5rem" }}>
+          Vandaag
+        </p>
+        <h2 style={{ fontSize: "1.2rem", marginBottom: "0.75rem" }}>
+          Wat de bot voor je doet:
+        </h2>
+        <ul
+          style={{
+            fontSize: "0.9rem",
+            color: "#d1d5db",
+            lineHeight: 1.8,
+          }}
+        >
+          <li>✅ Nieuwe leads → klik &amp; “Generate email job”</li>
+          <li>✅ Cron job → e-mails worden geschreven als drafts</li>
+          <li>✅ Jij klikt “Approve” → bot stuurt binnen limieten</li>
+          <li>✅ Alles logt in Supabase voor overzicht</li>
+        </ul>
+      </section>
+    </div>
   );
 }

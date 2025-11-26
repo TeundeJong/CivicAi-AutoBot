@@ -1,186 +1,101 @@
+// src/pages/api/cron-sendEmails.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../lib/supabaseAdmin";
+import { pickSenderForToday } from "../../lib/jobs";
 import { sendEmail } from "../../lib/emailProvider";
 
-const BATCH_SIZE = 100;
+const BATCH_SIZE = 10;
 
 export const config = {
   api: { bodyParser: false },
 };
 
-function startOfTodayUTC() {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}
-
-function getWarmupLimit(daysActive: number): number {
-  if (daysActive <= 0) return 5;
-  if (daysActive === 1) return 8;
-  if (daysActive === 2) return 12;
-  if (daysActive === 3) return 20;
-  if (daysActive === 4) return 30;
-  return 50;
-}
-
-type SenderQuota = {
-  email: string;
-  display_name: string | null;
-  remaining: number;
-  smtpHost?: string | null;
-  smtpPort?: number | null;
-  smtpUser?: string | null;
-  smtpPass?: string | null;
-};
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
   const auth = req.headers.authorization;
-  if (!auth || auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  const secret = process.env.CRON_SECRET;
+
+  if (!auth || auth !== `Bearer ${secret}`) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
   try {
-    const todayStart = startOfTodayUTC();
-
-    const { data: senders, error: senderError } = await supabaseAdmin
-      .from("sender_accounts")
-      .select("*")
-      .eq("is_active", true);
-
-    if (senderError) throw senderError;
-    if (!senders || senders.length === 0) {
-      return res.status(200).json({ message: "No active sender accounts", sent: 0 });
+    const senderSlot = await pickSenderForToday();
+    if (!senderSlot) {
+      return res.status(200).json({ sent: 0, reason: "no_capacity" });
     }
 
-    const senderQuotas: { [id: string]: SenderQuota } = {};
+    const { account, used, limit } = senderSlot;
+    const remaining = limit - used;
+    const toSend = Math.max(0, Math.min(BATCH_SIZE, remaining));
 
-    for (const s of senders) {
-      const warmupStart = s.warmup_start_date
-        ? new Date(s.warmup_start_date)
-        : todayStart;
-      const daysActive = Math.floor(
-        (todayStart.getTime() - warmupStart.getTime()) / (1000 * 60 * 60 * 24)
-      );
-      const limit = getWarmupLimit(daysActive);
-
-      const { count, error: countError } = await supabaseAdmin
-        .from("email_outbox")
-        .select("id", { count: "exact", head: true })
-        .eq("from_email", s.email)
-        .eq("status", "sent")
-        .gte("sent_at", todayStart.toISOString());
-
-      if (countError) throw countError;
-
-      const alreadySent = count ?? 0;
-      const remaining = Math.max(limit - alreadySent, 0);
-
-      senderQuotas[s.id] = {
-        email: s.email,
-        display_name: s.display_name,
-        remaining,
-        // ⬇️ SMTP per inbox uit de database (valt terug op env als leeg)
-        smtpHost: s.smtp_host ?? null,
-        smtpPort: s.smtp_port ?? null,
-        smtpUser: s.smtp_user ?? null,
-        smtpPass: s.smtp_pass ?? null,
-      };
+    if (toSend <= 0) {
+      return res.status(200).json({ sent: 0, reason: "limit_reached" });
     }
 
-    const totalRemaining = Object.values(senderQuotas).reduce(
-      (sum, s) => sum + s.remaining,
-      0
-    );
-
-    if (totalRemaining <= 0) {
-      return res.status(200).json({ message: "All senders at warmup limit", sent: 0 });
-    }
-
-    const { data: toSend, error } = await supabaseAdmin
+    const { data: rows, error } = await supabaseAdmin
       .from("email_outbox")
       .select("*")
-      .in("status", ["approved", "scheduled"])
+      .eq("status", "approved")
+      .is("sender_id", null)
       .order("created_at", { ascending: true })
-      .limit(Math.min(BATCH_SIZE, totalRemaining));
+      .limit(toSend);
 
     if (error) throw error;
-    if (!toSend || toSend.length === 0) {
-      return res.status(200).json({ message: "No emails to send", sent: 0 });
-    }
 
-    const senderIds = Object.keys(senderQuotas).filter(
-      (id) => senderQuotas[id].remaining > 0
-    );
-    if (senderIds.length === 0) {
-      return res.status(200).json({ message: "No remaining quota", sent: 0 });
-    }
+    const drafts = rows || [];
+    let sentCount = 0;
 
-    let sent = 0;
-    let senderIndex = 0;
-
-    for (const mail of toSend) {
-      let attempts = 0;
-      let senderId = senderIds[senderIndex];
-
-      while (
-        senderQuotas[senderId].remaining <= 0 &&
-        attempts < senderIds.length
-      ) {
-        senderIndex = (senderIndex + 1) % senderIds.length;
-        senderId = senderIds[senderIndex];
-        attempts++;
-      }
-
-      const sender = senderQuotas[senderId];
-      if (!sender || sender.remaining <= 0) break;
-
+    for (const draft of drafts) {
       try {
-        // ⬇️ SMTP-config per inbox: valt terug op env als db-veld leeg is
-        const smtpConfig = {
-          host: sender.smtpHost || process.env.SMTP_HOST,
-          port: sender.smtpPort || Number(process.env.SMTP_PORT || 587),
-          user: sender.smtpUser || process.env.SMTP_USER,
-          pass: sender.smtpPass || process.env.SMTP_PASS,
-        };
-
-        await sendEmail(
-          mail.to_email,
-          mail.subject,
-          mail.body,
-          sender.email,
-          sender.display_name || undefined,
-          smtpConfig
-        );
+        await sendEmail({
+          to: draft.to_email,
+          subject: draft.subject,
+          body: draft.body,
+          fromEmail: account.email,
+          displayName: account.display_name || "Teun from CivicAi",
+          smtpOverride: {
+            host: account.smtp_host || undefined,
+            port: account.smtp_port || undefined,
+            user: account.smtp_user || undefined,
+            pass: account.smtp_pass || undefined,
+          },
+        });
 
         await supabaseAdmin
           .from("email_outbox")
           .update({
             status: "sent",
+            sender_id: account.id,
             sent_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            error: null,
-            from_email: sender.email,
-            sender_id: senderId,
           })
-          .eq("id", mail.id);
+          .eq("id", draft.id);
 
-        sender.remaining -= 1;
-        sent++;
-        senderIndex = (senderIndex + 1) % senderIds.length;
-      } catch (e: any) {
+        sentCount++;
+      } catch (err: any) {
+        console.error("sendEmails error", err);
         await supabaseAdmin
           .from("email_outbox")
           .update({
             status: "failed",
-            error: e?.message ?? String(e),
+            error: err.message || String(err),
+            sender_id: account.id,
             updated_at: new Date().toISOString(),
           })
-          .eq("id", mail.id);
+          .eq("id", draft.id);
       }
     }
 
-    return res.status(200).json({ sent });
-  } catch (e: any) {
-    console.error(e);
-    return res.status(500).json({ error: e?.message ?? "Unknown error" });
+    return res.status(200).json({
+      sent: sentCount,
+      from: account.email,
+      remaining: remaining - sentCount,
+    });
+  } catch (err: any) {
+    console.error("cron-sendEmails fatal", err);
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 }

@@ -1,39 +1,36 @@
+// src/pages/api/jobs/enqueue.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabaseAdmin } from "../../../lib/supabaseAdmin";
-import { JobType, MarketingJobPayload } from "../../../lib/jobs";
+import { enqueueJob } from "../../../lib/jobs";
 
-type Body = {
-  type: JobType;
-  leadId?: string;
-  payload: MarketingJobPayload;
-};
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
   if (req.method !== "POST") return res.status(405).end();
 
   try {
-    const body = req.body as Body;
+    const { type, leadId, payload } = req.body;
 
-    if (!body.type || !body.payload) {
-      return res.status(400).json({ error: "Missing type or payload" });
+    if (type !== "GENERATE_EMAIL") {
+      return res.status(400).json({ error: "Unsupported job type" });
+    }
+    if (!leadId) {
+      return res.status(400).json({ error: "leadId is required" });
     }
 
-    const { data, error } = await supabaseAdmin
-      .from("marketing_jobs")
-      .insert({
-        type: body.type,
-        lead_id: body.leadId ?? null,
-        payload: body.payload,
-        status: "pending",
-      })
-      .select("*")
-      .single();
+    const job = await enqueueJob({
+      type: "GENERATE_EMAIL",
+      leadId,
+      payload: {
+        language: payload?.language || "nl",
+        autoApprove: !!payload?.autoApprove,
+        extraContext: payload?.extraContext || "",
+      },
+    });
 
-    if (error) throw error;
-
-    return res.status(200).json({ job: data });
-  } catch (e: any) {
-    console.error(e);
-    return res.status(500).json({ error: e?.message ?? "Unknown error" });
+    return res.status(200).json({ job });
+  } catch (err: any) {
+    console.error("enqueue error", err);
+    return res.status(500).json({ error: err.message || "Server error" });
   }
 }

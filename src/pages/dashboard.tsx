@@ -1,243 +1,310 @@
-import Head from "next/head";
+// src/pages/dashboard.tsx
 import { useEffect, useState } from "react";
 
-type EmailRow = {
+type EmailStatus = "draft" | "approved" | "sent" | "failed" | "declined";
+
+interface OutboxRow {
   id: string;
   to_email: string;
   subject: string;
-  status: "draft" | "approved" | "scheduled" | "sent" | "failed";
-  campaign_name: string | null;
+  body: string;
+  status: EmailStatus;
   created_at: string;
-  sent_at: string | null;
-  error: string | null;
-};
-
-const STATUS_LABEL: Record<EmailRow["status"], string> = {
-  draft: "Draft",
-  approved: "Approved",
-  scheduled: "Scheduled",
-  sent: "Sent",
-  failed: "Failed",
-};
-
-const STATUS_COLOR: Record<EmailRow["status"], string> = {
-  draft: "bg-gray-700 text-gray-100",
-  approved: "bg-green-600 text-white",
-  scheduled: "bg-amber-500 text-black",
-  sent: "bg-blue-600 text-white",
-  failed: "bg-red-600 text-white",
-};
+  updated_at: string;
+  leads?: { name?: string | null; company?: string | null } | null;
+}
 
 export default function DashboardPage() {
-  const [emails, setEmails] = useState<EmailRow[]>([]);
+  const [emails, setEmails] = useState<OutboxRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState<EmailRow["status"] | "all">("all");
+  const [filter, setFilter] = useState<EmailStatus | "all">("draft");
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
+  async function loadEmails(status: EmailStatus | "all") {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      setError(null);
-      const res = await fetch("/api/admin/emails");
-      if (!res.ok) {
-        throw new Error(`Failed to load emails: ${res.status}`);
-      }
+      const qs = status === "all" ? "" : `?status=${status}`;
+      const res = await fetch(`/api/admin/emails${qs}`);
       const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load emails");
       setEmails(json.emails || []);
-    } catch (e: any) {
-      console.error(e);
-      setError(e?.message ?? "Unknown error");
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Error");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
-  }, []);
+    loadEmails(filter);
+  }, [filter]);
 
-  async function updateStatus(id: string, status: EmailRow["status"]) {
+  async function updateStatus(id: string, status: EmailStatus) {
     try {
-      setError(null);
       const res = await fetch("/api/admin/email-status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, status }),
       });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Failed to update: ${res.status}`);
-      }
-      setEmails((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, status } : e))
-      );
-    } catch (e: any) {
-      console.error(e);
-      setError(e?.message ?? "Unknown error");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      await loadEmails(filter);
+    } catch (err: any) {
+      alert(err.message || "Kon status niet updaten");
     }
   }
 
-  const visibleEmails =
-    filter === "all" ? emails : emails.filter((e) => e.status === filter);
+  const counters = emails.reduce(
+    (acc, e) => {
+      acc[e.status] = (acc[e.status] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
 
   return (
-    <>
-      <Head>
-        <title>CivicAi Mailman · Dashboard</title>
-      </Head>
-      <div className="min-h-screen bg-slate-950 text-slate-100">
-        <header className="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold">CivicAi Mailman</h1>
-            <p className="text-sm text-slate-400">
-              Overview of generated outreach emails for ContractGuard AI.
-            </p>
-          </div>
-          <button
-            onClick={load}
-            className="rounded-md bg-slate-800 px-3 py-1.5 text-sm hover:bg-slate-700"
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+      <section>
+        <h1 style={{ fontSize: "1.6rem", fontWeight: 700, marginBottom: "0.5rem" }}>
+          Dashboard
+        </h1>
+        <p style={{ color: "#9ca3af", fontSize: "0.9rem" }}>
+          Hier keur je e-mails goed, houd je overzicht en start je cron-runs
+          vanuit Vercel / PowerShell.
+        </p>
+      </section>
+
+      <section
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
+          gap: "0.75rem",
+        }}
+      >
+        {["draft", "approved", "sent", "failed", "declined"].map((st) => (
+          <div
+            key={st}
+            style={{
+              borderRadius: "0.75rem",
+              padding: "0.75rem",
+              border: "1px solid #1f2933",
+              background: "#020617",
+            }}
           >
-            Refresh
-          </button>
-        </header>
-
-        <main className="px-6 py-4">
-          {error && (
-            <div className="mb-3 rounded-md bg-red-900/40 border border-red-600 px-3 py-2 text-sm">
-              {error}
+            <div
+              style={{
+                fontSize: "0.75rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.1em",
+                color: "#9ca3af",
+                marginBottom: "0.25rem",
+              }}
+            >
+              {st.toUpperCase()}
             </div>
-          )}
+            <div style={{ fontSize: "1.3rem", fontWeight: 700 }}>
+              {counters[st] || 0}
+            </div>
+          </div>
+        ))}
+      </section>
 
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <span className="text-sm text-slate-400 mr-2">Filter status:</span>
-            {(["all", "draft", "approved", "scheduled", "sent", "failed"] as const).map(
-              (s) => (
+      <section>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "0.75rem",
+            gap: "0.75rem",
+          }}
+        >
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            {(["all", "draft", "approved", "sent", "failed", "declined"] as const).map(
+              (st) => (
                 <button
-                  key={s}
-                  onClick={() =>
-                    setFilter(s === "all" ? "all" : (s as EmailRow["status"]))
-                  }
-                  className={`rounded-full px-3 py-1 text-xs border ${
-                    filter === s || (filter === "all" && s === "all")
-                      ? "border-sky-400 bg-sky-500/20"
-                      : "border-slate-700 bg-slate-900"
-                  }`}
+                  key={st}
+                  onClick={() => setFilter(st)}
+                  style={{
+                    padding: "0.3rem 0.7rem",
+                    borderRadius: "999px",
+                    border:
+                      filter === st
+                        ? "1px solid #6366f1"
+                        : "1px solid #1f2933",
+                    background:
+                      filter === st ? "#111827" : "transparent",
+                    fontSize: "0.8rem",
+                    cursor: "pointer",
+                  }}
                 >
-                  {s === "all" ? "All" : STATUS_LABEL[s as EmailRow["status"]]}
+                  {st.toUpperCase()}
                 </button>
               )
             )}
           </div>
+          <button
+            onClick={() => loadEmails(filter)}
+            style={{
+              padding: "0.35rem 0.8rem",
+              borderRadius: "999px",
+              border: "1px solid #4b5563",
+              fontSize: "0.8rem",
+              cursor: "pointer",
+            }}
+          >
+            Refresh
+          </button>
+        </div>
 
-          <div className="overflow-x-auto rounded-lg border border-slate-800">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-900/70 border-b border-slate-800">
+        {error && (
+          <div
+            style={{
+              padding: "0.5rem 0.75rem",
+              borderRadius: "0.5rem",
+              border: "1px solid #b91c1c",
+              color: "#fecaca",
+              background: "#450a0a",
+              marginBottom: "0.75rem",
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        <div
+          style={{
+            borderRadius: "0.75rem",
+            border: "1px solid #1f2933",
+            overflow: "hidden",
+          }}
+        >
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: "0.85rem",
+            }}
+          >
+            <thead style={{ background: "#020617" }}>
+              <tr>
+                <th style={{ padding: "0.5rem", textAlign: "left" }}>Lead</th>
+                <th style={{ padding: "0.5rem", textAlign: "left" }}>E-mail</th>
+                <th style={{ padding: "0.5rem", textAlign: "left" }}>Subject</th>
+                <th style={{ padding: "0.5rem", textAlign: "left" }}>Status</th>
+                <th style={{ padding: "0.5rem", textAlign: "right" }}>
+                  Acties
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium text-slate-300">
-                    To
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-300">
-                    Subject
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-300">
-                    Campaign
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-300">
-                    Status
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-300">
-                    Created
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-300">
-                    Sent
-                  </th>
-                  <th className="px-3 py-2 text-left font-medium text-slate-300">
-                    Actions
-                  </th>
+                  <td colSpan={5} style={{ padding: "0.8rem", textAlign: "center" }}>
+                    Laden...
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {visibleEmails.length === 0 && !loading && (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="px-3 py-6 text-center text-slate-500"
-                    >
-                      No emails yet.
-                    </td>
-                  </tr>
-                )}
-                {visibleEmails.map((e) => (
+              )}
+              {!loading && emails.length === 0 && (
+                <tr>
+                  <td colSpan={5} style={{ padding: "0.8rem", textAlign: "center" }}>
+                    Geen e-mails gevonden.
+                  </td>
+                </tr>
+              )}
+              {!loading &&
+                emails.map((e) => (
                   <tr
                     key={e.id}
-                    className="border-b border-slate-850 last:border-none hover:bg-slate-900/40"
+                    style={{
+                      borderTop: "1px solid #111827",
+                      background:
+                        e.status === "draft"
+                          ? "#020617"
+                          : e.status === "approved"
+                          ? "#022c22"
+                          : e.status === "sent"
+                          ? "#020617"
+                          : e.status === "failed"
+                          ? "#450a0a"
+                          : "#111827",
+                    }}
                   >
-                    <td className="px-3 py-2 align-top">
-                      <div className="font-mono text-xs">{e.to_email}</div>
-                    </td>
-                    <td className="px-3 py-2 align-top max-w-md">
-                      <div className="truncate">{e.subject}</div>
-                      {e.error && (
-                        <div className="mt-1 text-xs text-red-400">
-                          {e.error}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <div className="text-xs text-slate-400">
-                        {e.campaign_name || "-"}
+                    <td style={{ padding: "0.5rem" }}>
+                      <div>{e.leads?.name || "-"}</div>
+                      <div style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
+                        {e.leads?.company || ""}
                       </div>
                     </td>
-                    <td className="px-3 py-2 align-top">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLOR[e.status]}`}
-                      >
-                        {STATUS_LABEL[e.status]}
-                      </span>
+                    <td style={{ padding: "0.5rem", fontSize: "0.8rem" }}>
+                      {e.to_email}
                     </td>
-                    <td className="px-3 py-2 align-top text-xs text-slate-400">
-                      {new Date(e.created_at).toLocaleString()}
+                    <td style={{ padding: "0.5rem" }}>{e.subject}</td>
+                    <td style={{ padding: "0.5rem", fontSize: "0.8rem" }}>
+                      {e.status.toUpperCase()}
                     </td>
-                    <td className="px-3 py-2 align-top text-xs text-slate-400">
-                      {e.sent_at
-                        ? new Date(e.sent_at).toLocaleString()
-                        : "-"}
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <div className="flex flex-wrap gap-1">
+                    <td
+                      style={{
+                        padding: "0.5rem",
+                        textAlign: "right",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {e.status === "draft" && (
+                        <>
+                          <button
+                            onClick={() => updateStatus(e.id, "approved")}
+                            style={{
+                              padding: "0.25rem 0.6rem",
+                              borderRadius: "999px",
+                              border: "none",
+                              background: "#16a34a",
+                              fontSize: "0.75rem",
+                              marginRight: "0.25rem",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => updateStatus(e.id, "declined")}
+                            style={{
+                              padding: "0.25rem 0.6rem",
+                              borderRadius: "999px",
+                              border: "none",
+                              background: "#b91c1c",
+                              fontSize: "0.75rem",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Decline
+                          </button>
+                        </>
+                      )}
+                      {e.status === "approved" && (
                         <button
                           onClick={() => updateStatus(e.id, "draft")}
-                          className="rounded-md bg-gray-700 px-2 py-1 text-[11px] hover:bg-gray-600"
+                          style={{
+                            padding: "0.25rem 0.6rem",
+                            borderRadius: "999px",
+                            border: "none",
+                            background: "#4b5563",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                          }}
                         >
-                          Draft
+                          Terug naar draft
                         </button>
-                        <button
-                          onClick={() => updateStatus(e.id, "approved")}
-                          className="rounded-md bg-green-600 px-2 py-1 text-[11px] hover:bg-green-500"
-                        >
-                          Approved
-                        </button>
-                        <button
-                          onClick={() => updateStatus(e.id, "failed")}
-                          className="rounded-md bg-red-600 px-2 py-1 text-[11px] hover:bg-red-500"
-                        >
-                          Declined
-                        </button>
-                      </div>
+                      )}
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
-
-          {loading && (
-            <div className="mt-3 text-xs text-slate-400">
-              Loading latest data...
-            </div>
-          )}
-        </main>
-      </div>
-    </>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   );
 }
