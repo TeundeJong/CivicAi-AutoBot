@@ -65,7 +65,18 @@ export default function DashboardPage() {
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+  <div
+    style={{
+      display: "flex",
+      flexDirection: "column",
+      gap: "1.5rem",
+      color: "white",               // << HIER DE FIX
+      backgroundColor: "#020617",   // mooi donker blauw/zwart
+      minHeight: "100vh",
+      padding: "1.5rem",
+    }}
+  >
+
       <section>
         <h1 style={{ fontSize: "1.6rem", fontWeight: 700, marginBottom: "0.5rem" }}>
           Dashboard
@@ -188,7 +199,8 @@ export default function DashboardPage() {
               fontSize: "0.85rem",
             }}
           >
-            <thead style={{ background: "#020617" }}>
+            <thead style={{ background: "#020617", color: "white" }}>
+
               <tr>
                 <th style={{ padding: "0.5rem", textAlign: "left" }}>Lead</th>
                 <th style={{ padding: "0.5rem", textAlign: "left" }}>E-mail</th>
