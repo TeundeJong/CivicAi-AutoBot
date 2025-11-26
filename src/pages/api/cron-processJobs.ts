@@ -1,7 +1,7 @@
 // src/pages/api/cron-processJobs.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getPendingJobs, markJobStatus } from "../../lib/jobs";
-import { processGenerateEmailJob } from "../../lib/processors";
+import { processJob } from "../../lib/processors";
 
 const BATCH_SIZE = 10;
 
@@ -26,25 +26,30 @@ export default async function handler(
 
     for (const job of jobs) {
       try {
+        // markeer als "processing"
         await markJobStatus(job.id, "processing");
 
-        if (job.type === "GENERATE_EMAIL") {
-          await processGenerateEmailJob(job);
-        } else {
-          console.warn("Onbekend jobtype", job.type);
-        }
+        // laat processors.ts bepalen wat er moet gebeuren
+        await processJob(job);
 
+        // klaar
         await markJobStatus(job.id, "done");
         processed++;
       } catch (err: any) {
         console.error("Job failed", job.id, err);
-        await markJobStatus(job.id, "failed", err.message || String(err));
+        await markJobStatus(
+          job.id,
+          "failed",
+          err?.message ?? "Unknown error"
+        );
       }
     }
 
     return res.status(200).json({ processed });
-  } catch (err: any) {
-    console.error("cron-processJobs fatal", err);
-    return res.status(500).json({ error: err.message || "Server error" });
+  } catch (e: any) {
+    console.error(e);
+    return res.status(500).json({
+      error: e?.message ?? "Unknown error",
+    });
   }
 }
