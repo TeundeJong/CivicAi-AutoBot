@@ -1,6 +1,6 @@
 // src/pages/dashboard.tsx
 import { useEffect, useState } from "react";
-import Papa from "papaparse";          // ← erbij
+import Papa from "papaparse"; // ← erbij
 
 type EmailStatus = "draft" | "approved" | "sent" | "failed" | "declined";
 type LinkedInStatus = "draft" | "approved" | "used" | "declined" | "all";
@@ -40,160 +40,163 @@ export default function DashboardPage() {
   const [linkedinFilter, setLinkedinFilter] = useState<LinkedInStatus>("draft");
   const [linkedinLoading, setLinkedinLoading] = useState(false);
   const [linkedinError, setLinkedinError] = useState<string | null>(null);
+
   // --------- BULK LEADS ---------
   const [bulkInput, setBulkInput] = useState("");
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkFile, setBulkFile] = useState<File | null>(null);
 
+  // Oude handler (nu niet meer gebruikt, maar laten staan voor compat)
   async function handleCSVUpload(e: React.ChangeEvent<HTMLInputElement>) {
-  const file = e.target.files?.[0];
-  if (!file) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  const formData = new FormData();
-  formData.append("file", file);
+    const formData = new FormData();
+    formData.append("file", file);
 
-  const res = await fetch("/api/admin/bulk-csv", {
-    method: "POST",
-    body: formData,
-  });
+    const res = await fetch("/api/admin/bulk-csv", {
+      method: "POST",
+      body: formData,
+    });
 
-  const json = await res.json();
-  alert(`Imported ${json.inserted} leads + ${json.jobsCreated} jobs`);
+    const json = await res.json();
+    alert(`Imported ${json.inserted} leads + ${json.jobsCreated} jobs`);
 
-  await loadEmails();
-}
-
+    await loadEmails();
+  }
 
   async function handleBulkImport() {
-  // 1) Eerst: CSV-bestand?
-  if (bulkFile) {
+    // 1) Eerst: CSV-bestand?
+    if (bulkFile) {
+      setBulkLoading(true);
+      try {
+        // CSV inlezen
+        const text = await bulkFile.text();
+        const parsed = Papa.parse(text, {
+          header: true,
+          skipEmptyLines: true,
+        });
+
+        const rows = (parsed.data as any[])
+          .map((row) => {
+            const email =
+              row.email ||
+              row.Email ||
+              row["Email"] ||
+              row["Email Address"];
+
+            const name =
+              row.name ||
+              row.Name ||
+              row["First Name"] ||
+              row["First_Name"] ||
+              null;
+
+            const company =
+              row.company ||
+              row.Company ||
+              row["Company Name"] ||
+              null;
+
+            return { email, name, company };
+          })
+          .filter((r) => r.email && String(r.email).includes("@"));
+
+        if (!rows.length) {
+          alert("Geen geldige e-mailadressen in de CSV gevonden.");
+          return;
+        }
+
+        const res = await fetch("/api/admin/bulk-csv", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rows,
+            makeJobs: true, // e-mail + DM jobs
+          }),
+        });
+
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Bulk CSV failed");
+
+        alert(
+          `CSV: ${json.inserted} leads en ${json.jobsCreated} jobs aangemaakt.`
+        );
+
+        // reset file + input
+        const inputEl = document.getElementById(
+          "bulk-file-input"
+        ) as HTMLInputElement | null;
+        if (inputEl) inputEl.value = "";
+        setBulkFile(null);
+
+        // even wachten tot DB klaar is
+        await new Promise((r) => setTimeout(r, 250));
+
+        // e-mails opnieuw laden
+        await loadEmails();
+        return; // klaar, niet meer naar de textarea-mode gaan
+      } catch (err: any) {
+        alert(err.message || "Unknown CSV error");
+      } finally {
+        setBulkLoading(false);
+      }
+    }
+
+    // 2) Geen CSV: dan de oude textarea-mode gebruiken
+    if (!bulkInput.trim()) {
+      alert("Plak eerst een paar e-mailadressen of upload een CSV.");
+      return;
+    }
+
     setBulkLoading(true);
     try {
-      // CSV inlezen
-      const text = await bulkFile.text();
-      const parsed = Papa.parse(text, {
-        header: true,
-        skipEmptyLines: true,
-      });
-
-      const rows = (parsed.data as any[])
-        .map((row) => {
-          const email =
-            row.email ||
-            row.Email ||
-            row["Email"] ||
-            row["Email Address"];
-
-          const name =
-            row.name ||
-            row.Name ||
-            row["First Name"] ||
-            row["First_Name"] ||
-            null;
-
-          const company =
-            row.company ||
-            row.Company ||
-            row["Company Name"] ||
-            null;
-
-          return { email, name, company };
-        })
-        .filter((r) => r.email && String(r.email).includes("@"));
-
-      if (!rows.length) {
-        alert("Geen geldige e-mailadressen in de CSV gevonden.");
-        return;
-      }
-
-      const res = await fetch("/api/admin/bulk-csv", {
+      const res = await fetch("/api/admin/bulk-leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          rows,
-          makeJobs: true, // e-mail + DM jobs
+          lines: bulkInput,
+          makeJobs: true,
         }),
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Bulk CSV failed");
+      if (!res.ok) throw new Error(json.error || "Bulk import failed");
 
       alert(
-        `CSV: ${json.inserted} leads en ${json.jobsCreated} jobs aangemaakt.`
+        `Added ${json.inserted} leads and created ${json.jobsCreated} jobs. Run the cron to generate content.`
       );
 
-      // reset file + input
-      setBulkFile(null);
-      const inputEl = document.getElementById(
-        "bulk-file-input"
-      ) as HTMLInputElement | null;
-      if (inputEl) inputEl.value = "";
+      setBulkInput("");
 
-      // e-mails opnieuw laden
+      // kleine delay zodat inserts klaar zijn
+      await new Promise((r) => setTimeout(r, 250));
       await loadEmails();
-      return; // klaar, niet meer naar de textarea-mode gaan
     } catch (err: any) {
-      alert(err.message || "Unknown CSV error");
+      alert(err.message || "Unknown error");
     } finally {
       setBulkLoading(false);
     }
   }
 
-  // 2) Geen CSV: dan de oude textarea-mode gebruiken
-  if (!bulkInput.trim()) {
-    alert("Plak eerst een paar e-mailadressen of upload een CSV.");
-    return;
+  // ---------- EMAIL LOADERS ----------
+
+  async function loadEmails() {
+    setEmailLoading(true);
+    setEmailError(null);
+    try {
+      // altijd ALLE e-mails ophalen
+      const res = await fetch(`/api/admin/emails`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load emails");
+      setEmails(json.emails || []);
+    } catch (err: any) {
+      console.error(err);
+      setEmailError(err.message || "Error");
+    } finally {
+      setEmailLoading(false);
+    }
   }
-
-  setBulkLoading(true);
-  try {
-    const res = await fetch("/api/admin/bulk-leads", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        lines: bulkInput,
-        makeJobs: true,
-      }),
-    });
-
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || "Bulk import failed");
-
-    alert(
-      `Added ${json.inserted} leads and created ${json.jobsCreated} jobs. Run the cron to generate content.`
-    );
-
-    setBulkInput("");
-    await loadEmails();
-  } catch (err: any) {
-    alert(err.message || "Unknown error");
-  } finally {
-    setBulkLoading(false);
-  }
-}
-
-  
-
- // ---------- EMAIL LOADERS ----------
-
-async function loadEmails() {
-  setEmailLoading(true);
-  setEmailError(null);
-  try {
-    // altijd ALLE e-mails ophalen
-    const res = await fetch(`/api/admin/emails`);
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || "Failed to load emails");
-    setEmails(json.emails || []);
-  } catch (err: any) {
-    console.error(err);
-    setEmailError(err.message || "Error");
-  } finally {
-    setEmailLoading(false);
-  }
-}
-
-
 
   async function updateEmailStatus(id: string, status: EmailStatus) {
     try {
@@ -237,12 +240,11 @@ async function loadEmails() {
 
   // ---------- EFFECTS ----------
 
-useEffect(() => {
-  if (activeTab === "emails") {
-    loadEmails();
-  }
-}, [activeTab]);
-
+  useEffect(() => {
+    if (activeTab === "emails") {
+      loadEmails();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (activeTab === "linkedin_posts") {
@@ -397,6 +399,7 @@ useEffect(() => {
         je cron-runs vanuit Vercel / PowerShell. Alles wat hier staat blijft
         “human-in-the-loop”: jij beslist wat er echt verstuurd wordt.
       </p>
+
       {/* Bulk import leads + queue jobs */}
       <section
         style={{
@@ -442,21 +445,24 @@ useEffect(() => {
           }}
           placeholder={`Example:\nJohn Smith, ACME Corp, john@acme.com\ninfo@contractlawyer.com`}
         />
-<input
-  id="bulk-file-input"
-  type="file"
-  accept=".csv,text/csv"
-  onChange={(e) => setBulkFile(e.target.files?.[0] ?? null)}
-  style={{
-    marginTop: "1rem",
-    padding: "0.4rem",
-    border: "1px solid #333",
-    borderRadius: "8px",
-    background: "#111",
-    color: "#fff",
-  }}
-/>
 
+        {/* CSV upload */}
+        <input
+          id="bulk-file-input"
+          type="file"
+          accept=".csv,text/csv"
+          onChange={(e) => setBulkFile(e.target.files?.[0] ?? null)}
+          style={{
+            marginBottom: "0.5rem",
+            padding: "0.4rem",
+            border: "1px solid #1f2937",
+            borderRadius: "0.5rem",
+            background: "#020617",
+            color: "#e5e7eb",
+            fontSize: "0.8rem",
+            display: "block",
+          }}
+        />
 
         <button
           onClick={handleBulkImport}
@@ -476,21 +482,18 @@ useEffect(() => {
         </button>
       </section>
 
-
-
       {/* ---- ACTIEVE TAB ---- */}
       {activeTab === "emails" ? (
-       <EmailSection
-  emails={emails}
-  loading={emailLoading}
-  error={emailError}
-  filter={emailFilter}
-  setFilter={setEmailFilter}
-  counters={emailCounters}
-  reload={loadEmails}
-  updateStatus={updateEmailStatus}
-/>
-
+        <EmailSection
+          emails={emails}
+          loading={emailLoading}
+          error={emailError}
+          filter={emailFilter}
+          setFilter={setEmailFilter}
+          counters={emailCounters}
+          reload={loadEmails}
+          updateStatus={updateEmailStatus}
+        />
       ) : (
         <LinkedInSection
           type={activeTab === "linkedin_posts" ? "post" : "dm"}
@@ -538,8 +541,7 @@ function EmailSection(props: EmailSectionProps) {
     updateStatus,
   } = props;
   const visibleEmails =
-  filter === "all" ? emails : emails.filter((e) => e.status === filter);
-
+    filter === "all" ? emails : emails.filter((e) => e.status === filter);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -594,29 +596,29 @@ function EmailSection(props: EmailSectionProps) {
           }}
         >
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            {(["all", "draft", "approved", "sent", "failed", "declined"] as const).map(
-              (st) => (
-                <button
-                  key={st}
-                  onClick={() => setFilter(st)}
-                  style={{
-                    padding: "0.3rem 0.7rem",
-                    borderRadius: "999px",
-                    border:
-                      filter === st
-                        ? "1px solid #6366f1"
-                        : "1px solid #1f2933",
-                    background:
-                      filter === st ? "#111827" : "transparent",
-                    fontSize: "0.8rem",
-                    cursor: "pointer",
-                    color: "#e5e7eb",
-                  }}
-                >
-                  {st.toUpperCase()}
-                </button>
-              )
-            )}
+            {(
+              ["all", "draft", "approved", "sent", "failed", "declined"] as const
+            ).map((st) => (
+              <button
+                key={st}
+                onClick={() => setFilter(st)}
+                style={{
+                  padding: "0.3rem 0.7rem",
+                  borderRadius: "999px",
+                  border:
+                    filter === st
+                      ? "1px solid #6366f1"
+                      : "1px solid #1f2933",
+                  background:
+                    filter === st ? "#111827" : "transparent",
+                  fontSize: "0.8rem",
+                  cursor: "pointer",
+                  color: "#e5e7eb",
+                }}
+              >
+                {st.toUpperCase()}
+              </button>
+            ))}
           </div>
           <button
             onClick={reload}
@@ -677,15 +679,20 @@ function EmailSection(props: EmailSectionProps) {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={5} style={{ padding: "0.8rem", textAlign: "center" }}>
+                  <td
+                    colSpan={5}
+                    style={{ padding: "0.8rem", textAlign: "center" }}
+                  >
                     Laden...
                   </td>
                 </tr>
               )}
-                            {!loading && visibleEmails.length === 0 && (
-
+              {!loading && visibleEmails.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ padding: "0.8rem", textAlign: "center" }}>
+                  <td
+                    colSpan={5}
+                    style={{ padding: "0.8rem", textAlign: "center" }}
+                  >
                     Geen e-mails gevonden.
                   </td>
                 </tr>
@@ -710,74 +717,84 @@ function EmailSection(props: EmailSectionProps) {
                   >
                     <td style={{ padding: "0.5rem" }}>
                       <div>{e.leads?.name || "-"}</div>
-                      <div style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          color: "#9ca3af",
+                        }}
+                      >
                         {e.leads?.company || ""}
                       </div>
                     </td>
-                    <td style={{ padding: "0.5rem", fontSize: "0.8rem" }}>
+                    <td
+                      style={{ padding: "0.5rem", fontSize: "0.8rem" }}
+                    >
                       {e.to_email}
                     </td>
                     <td style={{ padding: "0.5rem" }}>{e.subject}</td>
-                    <td style={{ padding: "0.5rem", fontSize: "0.8rem" }}>
+                    <td
+                      style={{ padding: "0.5rem", fontSize: "0.8rem" }}
+                    >
                       {e.status.toUpperCase()}
                     </td>
                     <td
-  style={{
-    padding: "0.5rem",
-    textAlign: "right",
-    whiteSpace: "nowrap",
-  }}
->
-  {e.status === "draft" && (
-    <>
-      <button
-        onClick={() => updateStatus(e.id, "approved")}
-        style={{
-          padding: "0.25rem 0.6rem",
-          borderRadius: "999px",
-          border: "none",
-          background: "#16a34a",
-          fontSize: "0.75rem",
-          marginRight: "0.25rem",
-          cursor: "pointer",
-          color: "#f9fafb",
-        }}
-      >
-        Approve
-      </button>
-      <button
-        onClick={() => updateStatus(e.id, "declined")}
-        style={{
-          padding: "0.25rem 0.6rem",
-          borderRadius: "999px",
-          border: "none",
-          background: "#b91c1c",
-          fontSize: "0.75rem",
-          cursor: "pointer",
-          color: "#f9fafb",
-        }}
-      >
-        Decline
-      </button>
-    </>
-  )}
+                      style={{
+                        padding: "0.5rem",
+                        textAlign: "right",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {e.status === "draft" && (
+                        <>
+                          <button
+                            onClick={() => updateStatus(e.id, "approved")}
+                            style={{
+                              padding: "0.25rem 0.6rem",
+                              borderRadius: "999px",
+                              border: "none",
+                              background: "#16a34a",
+                              fontSize: "0.75rem",
+                              marginRight: "0.25rem",
+                              cursor: "pointer",
+                              color: "#f9fafb",
+                            }}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => updateStatus(e.id, "declined")}
+                            style={{
+                              padding: "0.25rem 0.6rem",
+                              borderRadius: "999px",
+                              border: "none",
+                              background: "#b91c1c",
+                              fontSize: "0.75rem",
+                              cursor: "pointer",
+                              color: "#f9fafb",
+                            }}
+                          >
+                            Decline
+                          </button>
+                        </>
+                      )}
 
-  {(e.status === "approved" || e.status === "declined") && (
-    <button
-      onClick={() => updateStatus(e.id, "draft")}
-      style={{
-        padding: "0.25rem 0.6rem",
-        borderRadius: "999px",
-        border: "none",
-        background: "#4b5563",
-        fontSize: "0.75rem",
-        cursor: "pointer",
-        color: "#f9fafb",
-      }}
-    >
-      Back to draft
-    </button>
-  )}
+                      {(e.status === "approved" ||
+                        e.status === "declined") && (
+                        <button
+                          onClick={() => updateStatus(e.id, "draft")}
+                          style={{
+                            padding: "0.25rem 0.6rem",
+                            borderRadius: "999px",
+                            border: "none",
+                            background: "#4b5563",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            color: "#f9fafb",
+                          }}
+                        >
+                          Back to draft
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -839,7 +856,8 @@ function LinkedInSection(props: LinkedInSectionProps) {
               borderRadius: "0.75rem",
               padding: "0.9rem",
               border: "1px solid #111827",
-              background: "linear-gradient(to bottom right,#020617,#020617)",
+              background:
+                "linear-gradient(to bottom right,#020617,#020617)",
             }}
           >
             <div
@@ -873,10 +891,20 @@ function LinkedInSection(props: LinkedInSectionProps) {
         >
           <div>
             <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>{title}</h2>
-            <p style={{ fontSize: "0.85rem", color: "#9ca3af" }}>{description}</p>
+            <p
+              style={{ fontSize: "0.85rem", color: "#9ca3af" }}
+            >
+              {description}
+            </p>
           </div>
 
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "0.5rem",
+              alignItems: "center",
+            }}
+          >
             <select
               value={filter}
               onChange={(e) => setFilter(e.target.value as LinkedInStatus)}

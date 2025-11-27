@@ -25,8 +25,8 @@ export async function generateSalesEmail(options: {
       : "You are a B2B sales copywriter. You write short, concrete, friendly outreach emails about ContractGuard AI.";
 
   const prompt =
-  language === "nl"
-    ? `Schrijf een korte eerste outreach e-mail over ContractGuard AI.
+    language === "nl"
+      ? `Schrijf een korte eerste outreach e-mail over ContractGuard AI.
       
 Naam: ${leadName || "-"}
 Bedrijf: ${company || "-"}
@@ -40,9 +40,7 @@ Regels:
 - Eindig altijd met:
   "Met vriendelijke groet,
    Teun – CivicAi Solutions"`
-
-
-: `Write a short first outreach email about ContractGuard AI.
+      : `Write a short first outreach email about ContractGuard AI.
 
 Name: ${leadName || "-"}
 Company: ${company || "-"}
@@ -55,9 +53,7 @@ Rules:
 - End with a simple call-to-action (e.g. "Would you like a short demo?").
 - Always end with:
   "Best regards,
-   Teun – CivicAi Solutions"`
-
-
+   Teun – CivicAi Solutions"`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -67,15 +63,44 @@ Rules:
     ],
   });
 
-  const text = completion.choices[0].message.content || "";
+  // ---- Post-processing: signature & placeholders fixen ----
+  let text = completion.choices[0]?.message?.content || "";
 
-  const [firstLine, ...rest] = text.split("\n").filter(Boolean);
+  // Normaliseer line endings
+  text = text.replace(/\r\n/g, "\n");
+
+  // Vervang (your name) / your name → jouw echte naam + bedrijf
+  text = text
+    .replace(/\(your ?name\)/gi, "Teun – CivicAi Solutions")
+    .replace(/your name/gi, "Teun – CivicAi Solutions");
+
+  const signature =
+    language === "nl"
+      ? `Met vriendelijke groet,\nTeun – CivicAi Solutions`
+      : `Best regards,\nTeun – CivicAi Solutions`;
+
+  const lower = text.toLowerCase();
+
+  // Als de juiste signature er nog niet in staat, voeg hem toe
+  if (
+    !lower.includes("teun – civicai solutions") &&
+    !lower.includes("teun - civicai solutions")
+  ) {
+    text += `\n\n${signature}`;
+  }
+
+  // ---- Subject + body eruit halen zoals je al deed ----
+  const lines = text.split("\n").filter(Boolean);
+  const [firstLine, ...rest] = lines;
   let subject = firstLine.replace(/^onderwerp[:\-]\s*/i, "").trim();
   let body = rest.join("\n").trim();
 
   if (!subject || !body) {
     // fallback: hele tekst als body
-    subject = language === "nl" ? "ContractGuard AI – contracten sneller en veiliger" : "ContractGuard AI – faster, safer contracts";
+    subject =
+      language === "nl"
+        ? "ContractGuard AI – contracten sneller en veiliger"
+        : "ContractGuard AI – faster, safer contracts";
     body = text;
   }
 
