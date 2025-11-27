@@ -39,14 +39,54 @@ export default function DashboardPage() {
   const [linkedinFilter, setLinkedinFilter] = useState<LinkedInStatus>("draft");
   const [linkedinLoading, setLinkedinLoading] = useState(false);
   const [linkedinError, setLinkedinError] = useState<string | null>(null);
+  // --------- BULK LEADS ---------
+  const [bulkInput, setBulkInput] = useState("");
+  const [bulkLoading, setBulkLoading] = useState(false);
 
+  async function handleBulkImport() {
+    if (!bulkInput.trim()) {
+      alert("Plak eerst een paar e-mailadressen.");
+      return;
+    }
+
+    setBulkLoading(true);
+    try {
+      const res = await fetch("/api/admin/bulk-leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lines: bulkInput,
+          makeJobs: true, // tegelijk e-mail + DM jobs maken
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Bulk import failed");
+
+      alert(
+        `Added ${json.inserted} leads and created ${json.jobsCreated} jobs. Run the cron to generate content.`
+      );
+
+      setBulkInput("");
+      if (activeTab === "emails") {
+        await loadEmails(); // << let op: GEEN argument meer
+      }
+    } catch (err: any) {
+      alert(err.message || "Unknown error");
+    } finally {
+      setBulkLoading(false);
+    }
+  }
+
+  
 
  // ---------- EMAIL LOADERS ----------
+
 async function loadEmails() {
   setEmailLoading(true);
   setEmailError(null);
   try {
-    // altijd ALLE e-mails ophalen, geen status-filter in de API
+    // altijd ALLE e-mails ophalen
     const res = await fetch(`/api/admin/emails`);
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || "Failed to load emails");
@@ -58,6 +98,7 @@ async function loadEmails() {
     setEmailLoading(false);
   }
 }
+
 
 
   async function updateEmailStatus(id: string, status: EmailStatus) {
@@ -262,6 +303,71 @@ useEffect(() => {
         je cron-runs vanuit Vercel / PowerShell. Alles wat hier staat blijft
         “human-in-the-loop”: jij beslist wat er echt verstuurd wordt.
       </p>
+      {/* Bulk import leads + queue jobs */}
+      <section
+        style={{
+          marginTop: "0.5rem",
+          marginBottom: "1.5rem",
+          maxWidth: "640px",
+          padding: "0.75rem 1rem",
+          borderRadius: "0.75rem",
+          border: "1px solid #1f2937",
+          background: "#020617",
+        }}
+      >
+        <h2 style={{ fontSize: "1rem", marginBottom: "0.25rem" }}>
+          Bulk add leads & queue jobs
+        </h2>
+        <p
+          style={{
+            fontSize: "0.8rem",
+            color: "#9ca3af",
+            marginBottom: "0.5rem",
+          }}
+        >
+          One contact per line. Format:{" "}
+          <code>Name, Company, email@domain.com</code> or just{" "}
+          <code>email@domain.com</code>. The bot will create email drafts and
+          LinkedIn DM drafts for each lead.
+        </p>
+
+        <textarea
+          value={bulkInput}
+          onChange={(e) => setBulkInput(e.target.value)}
+          rows={4}
+          style={{
+            width: "100%",
+            borderRadius: "0.5rem",
+            border: "1px solid #1f2937",
+            background: "#020617",
+            color: "#e5e7eb",
+            padding: "0.5rem",
+            fontSize: "0.85rem",
+            marginBottom: "0.5rem",
+            resize: "vertical",
+          }}
+          placeholder={`Example:\nJohn Smith, ACME Corp, john@acme.com\ninfo@contractlawyer.com`}
+        />
+
+        <button
+          onClick={handleBulkImport}
+          disabled={bulkLoading}
+          style={{
+            padding: "0.35rem 0.9rem",
+            borderRadius: "999px",
+            border: "none",
+            background: "#4f46e5",
+            color: "#f9fafb",
+            fontSize: "0.8rem",
+            cursor: "pointer",
+            opacity: bulkLoading ? 0.6 : 1,
+          }}
+        >
+          {bulkLoading ? "Saving…" : "Save leads + create jobs"}
+        </button>
+      </section>
+
+
 
       {/* ---- ACTIEVE TAB ---- */}
       {activeTab === "emails" ? (
@@ -467,7 +573,8 @@ function EmailSection(props: EmailSectionProps) {
                   </td>
                 </tr>
               )}
-              {!loading && emails.length === 0 && (
+                            {!loading && visibleEmails.length === 0 && (
+
                 <tr>
                   <td colSpan={5} style={{ padding: "0.8rem", textAlign: "center" }}>
                     Geen e-mails gevonden.
