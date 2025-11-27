@@ -1,8 +1,10 @@
 // src/pages/api/admin/cron-processJobs.ts
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../lib/supabaseAdmin";
 import { getPendingJobs, markJobStatus } from "../../lib/jobs";
 import { generateSalesEmail } from "../../lib/openaiClient";
+
 
 export default async function handler(
   req: NextApiRequest,
@@ -37,8 +39,9 @@ export default async function handler(
         if (!lead?.email) throw new Error("Lead heeft geen email");
 
         // 3) E-mail laten schrijven
-          const payload: any = job.payload || {};
-        const language: "en" = "en"; // altijd Engels
+        const payload: any = job.payload || {};
+        const language: "en" | "nl" =
+          (payload.language as "en" | "nl") || "en";
 
         const { subject, body } = await generateSalesEmail({
           language,
