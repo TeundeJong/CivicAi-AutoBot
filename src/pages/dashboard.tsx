@@ -34,6 +34,11 @@ export default function DashboardPage() {
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
 
+  // -------- EMAIL EDITOR --------
+  const [selectedEmail, setSelectedEmail] = useState<OutboxRow | null>(null);
+  const [editSubject, setEditSubject] = useState("");
+  const [editBody, setEditBody] = useState("");
+
   // -------- LINKEDIN STATE --------
   const [linkedinPosts, setLinkedinPosts] = useState<LinkedInItem[]>([]);
   const [linkedinDMs, setLinkedinDMs] = useState<LinkedInItem[]>([]);
@@ -50,7 +55,7 @@ export default function DashboardPage() {
   // ---------- BULK IMPORT ----------
 
   async function handleBulkImport() {
-    // 1) Als er een CSV-bestand is: eerst CSV → lines string maken
+    // 1) CSV-bestand → lines string maken
     if (bulkFile) {
       setBulkLoading(true);
       try {
@@ -128,8 +133,7 @@ export default function DashboardPage() {
           return;
         }
 
-        // zelfde formaat als de textarea verwacht:
-        // "Name, Company, email@domain.com"
+        // zelfde formaat als textarea-mode:
         const lines = rows
           .map((r) => {
             if (r.name || r.company) {
@@ -175,7 +179,7 @@ export default function DashboardPage() {
       }
     }
 
-    // 2) Geen CSV: oude textarea-mode
+    // 2) Geen CSV: textarea-mode
     if (!bulkInput.trim()) {
       alert("Plak eerst een paar e-mailadressen of upload een CSV.");
       return;
@@ -240,6 +244,38 @@ export default function DashboardPage() {
       await loadEmails();
     } catch (err: any) {
       alert(err.message || "Kon e-mailstatus niet updaten");
+    }
+  }
+
+  // ---------- EMAIL EDITOR HELPERS ----------
+
+  function openEmailEditor(email: OutboxRow) {
+    setSelectedEmail(email);
+    setEditSubject(email.subject);
+    setEditBody(email.body);
+  }
+
+  async function saveEmailEdit() {
+    if (!selectedEmail) return;
+
+    try {
+      const res = await fetch("/api/admin/email-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: selectedEmail.id,
+          subject: editSubject,
+          body: editBody,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to update email");
+
+      setSelectedEmail(null);
+      await loadEmails();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Kon e-mail niet opslaan");
     }
   }
 
@@ -524,6 +560,7 @@ export default function DashboardPage() {
           counters={emailCounters}
           reload={loadEmails}
           updateStatus={updateEmailStatus}
+          onOpenEmail={openEmailEditor}
         />
       ) : (
         <LinkedInSection
@@ -543,6 +580,167 @@ export default function DashboardPage() {
           copyToClipboard={copyToClipboard}
         />
       )}
+
+      {/* SIMPLE EMAIL EDIT MODAL */}
+      {selectedEmail && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.75)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: "720px",
+              maxHeight: "80vh",
+              background: "#020617",
+              borderRadius: "0.75rem",
+              border: "1px solid #1f2937",
+              padding: "1rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.75rem",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <h2
+                style={{
+                  fontSize: "1.1rem",
+                  fontWeight: 600,
+                }}
+              >
+                View / edit email
+              </h2>
+              <button
+                onClick={() => setSelectedEmail(null)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  color: "#9ca3af",
+                  fontSize: "1.2rem",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div
+              style={{
+                fontSize: "0.85rem",
+                color: "#9ca3af",
+              }}
+            >
+              <div>
+                <strong>To:</strong> {selectedEmail.to_email}
+              </div>
+              <div>
+                <strong>Status:</strong> {selectedEmail.status.toUpperCase()}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              <label
+                style={{
+                  fontSize: "0.8rem",
+                  color: "#9ca3af",
+                }}
+              >
+                Subject
+              </label>
+              <input
+                value={editSubject}
+                onChange={(e) => setEditSubject(e.target.value)}
+                style={{
+                  width: "100%",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #1f2937",
+                  background: "#020617",
+                  color: "#e5e7eb",
+                  padding: "0.4rem 0.6rem",
+                  fontSize: "0.9rem",
+                }}
+              />
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+              <label
+                style={{
+                  fontSize: "0.8rem",
+                  color: "#9ca3af",
+                }}
+              >
+                Body
+              </label>
+              <textarea
+                value={editBody}
+                onChange={(e) => setEditBody(e.target.value)}
+                rows={14}
+                style={{
+                  width: "100%",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #1f2937",
+                  background: "#020617",
+                  color: "#e5e7eb",
+                  padding: "0.5rem 0.6rem",
+                  fontSize: "0.9rem",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "0.5rem",
+                marginTop: "0.25rem",
+              }}
+            >
+              <button
+                onClick={() => setSelectedEmail(null)}
+                style={{
+                  padding: "0.35rem 0.9rem",
+                  borderRadius: "999px",
+                  border: "1px solid #4b5563",
+                  background: "transparent",
+                  fontSize: "0.8rem",
+                  cursor: "pointer",
+                  color: "#e5e7eb",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveEmailEdit}
+                style={{
+                  padding: "0.35rem 0.9rem",
+                  borderRadius: "999px",
+                  border: "none",
+                  background: "#4f46e5",
+                  fontSize: "0.8rem",
+                  cursor: "pointer",
+                  color: "#f9fafb",
+                }}
+              >
+                Save changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -558,6 +756,7 @@ interface EmailSectionProps {
   counters: Record<string, number>;
   reload: () => void;
   updateStatus: (id: string, status: EmailStatus) => void;
+  onOpenEmail: (email: OutboxRow) => void;
 }
 
 function EmailSection(props: EmailSectionProps) {
@@ -570,6 +769,7 @@ function EmailSection(props: EmailSectionProps) {
     counters,
     reload,
     updateStatus,
+    onOpenEmail,
   } = props;
 
   const visibleEmails =
@@ -784,6 +984,22 @@ function EmailSection(props: EmailSectionProps) {
                         whiteSpace: "nowrap",
                       }}
                     >
+                      <button
+                        onClick={() => onOpenEmail(e)}
+                        style={{
+                          padding: "0.25rem 0.6rem",
+                          borderRadius: "999px",
+                          border: "1px solid #4b5563",
+                          background: "transparent",
+                          fontSize: "0.75rem",
+                          cursor: "pointer",
+                          color: "#e5e7eb",
+                          marginRight: "0.25rem",
+                        }}
+                      >
+                        View / edit
+                      </button>
+
                       {e.status === "draft" && (
                         <>
                           <button

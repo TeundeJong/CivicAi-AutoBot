@@ -5,7 +5,7 @@ import { supabaseAdmin, MarketingJob, SenderAccount } from "./supabaseAdmin";
 export type JobType = "GENERATE_EMAIL";
 
 export interface EnqueueJobPayload {
-  language: "nl" | "en";
+ language: "en",
   autoApprove: boolean;
   extraContext?: string;
 }

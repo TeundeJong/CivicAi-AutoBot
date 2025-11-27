@@ -38,8 +38,8 @@ export default async function handler(
 
         // 3) E-mail laten schrijven
         const payload: any = job.payload || {};
-        const language =
-          (payload.language as "nl" | "en") || ("en" as "en" | "nl");
+        const language: "nl" | "en" =
+          (payload.language as "nl" | "en") || "en";
 
         const { subject, body } = await generateSalesEmail({
           language,

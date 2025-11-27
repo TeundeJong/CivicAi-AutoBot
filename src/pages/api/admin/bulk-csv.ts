@@ -1,6 +1,6 @@
 // src/pages/api/admin/bulk-csv.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabaseAdmin } from "../../../lib/supabaseAdmin"; // <== JOUW versie
+import { supabaseAdmin } from "../../../lib/supabaseAdmin";
 
 type RowInput = {
   email?: string | null;
@@ -66,6 +66,7 @@ export default async function handler(
     if (makeJobs) {
       const jobs = (insertedLeads || []).map((lead) => ({
         type: "GENERATE_EMAIL",
+        status: "pending", // <-- belangrijk voor marketing_jobs
         lead_id: lead.id,
         payload: {
           language: lead.email.endsWith(".nl") ? "nl" : "en",
@@ -76,7 +77,7 @@ export default async function handler(
 
       if (jobs.length) {
         const { error: jobsErr } = await supabaseAdmin
-          .from("jobs")
+          .from("marketing_jobs") // <-- gebruik marketing_jobs
           .insert(jobs);
 
         if (jobsErr) {

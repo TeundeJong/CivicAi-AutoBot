@@ -68,7 +68,12 @@ Teun – CivicAi Solutions`;
   const text = completion.choices[0].message.content || "";
 
   const [firstLine, ...rest] = text.split("\n").filter(Boolean);
-  let subject = firstLine.replace(/^onderwerp[:\-]\s*/i, "").trim();
+
+  // Subject kan "Onderwerp: ..." of "Subject: ..." zijn → strip dat
+  let subjectLine = firstLine.trim();
+  subjectLine = subjectLine.replace(/^(onderwerp|subject)\s*[:\-]\s*/i, "").trim();
+
+  let subject = subjectLine;
   let body = rest.join("\n").trim();
 
   if (!subject || !body) {
@@ -80,5 +85,35 @@ Teun – CivicAi Solutions`;
     body = text;
   }
 
-  return { subject, body };
+  // ---------- BODY POST-PROCESSING: fix "Your name" en handtekening ----------
+
+  let cleanedBody = body;
+
+  // Common varianten vervangen
+  cleanedBody = cleanedBody.replace(
+    /(Best regards,?\s*)(Your name|YOUR NAME|\[Your Name\])/gi,
+    "Best regards,\nTeun – CivicAi Solutions"
+  );
+
+  cleanedBody = cleanedBody.replace(
+    /(Met vriendelijke groet,?\s*)(jouw naam|je naam)/gi,
+    "Met vriendelijke groet,\nTeun – CivicAi Solutions"
+  );
+
+  // Losse "Your name" opruimen
+  cleanedBody = cleanedBody.replace(/\bYour name\b/gi, "Teun – CivicAi Solutions");
+
+  // Als de juiste ondertekening nog NIET in de tekst zit, forceer hem
+  if (!cleanedBody.includes("Teun – CivicAi Solutions")) {
+    if (language === "en") {
+      // trailing "Best regards," zonder naam weghalen
+      cleanedBody = cleanedBody.replace(/Best regards,?\s*$/i, "").trim();
+      cleanedBody += `\n\nBest regards,\nTeun – CivicAi Solutions`;
+    } else {
+      cleanedBody = cleanedBody.replace(/Met vriendelijke groet,?\s*$/i, "").trim();
+      cleanedBody += `\n\nMet vriendelijke groet,\nTeun – CivicAi Solutions`;
+    }
+  }
+
+  return { subject, body: cleanedBody };
 }
