@@ -154,10 +154,10 @@ export default function DashboardPage() {
 
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Bulk import failed");
+alert(
+  `CSV import: ${json.inserted} leads en ${json.emailsCreated || 0} e-mail drafts aangemaakt.`
+);
 
-        alert(
-          `CSV import: ${json.inserted} leads en ${json.jobsCreated} jobs aangemaakt.`
-        );
 
         // reset file + textarea
         const inputEl = document.getElementById(
@@ -199,9 +199,10 @@ export default function DashboardPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Bulk import failed");
 
-      alert(
-        `Added ${json.inserted} leads and created ${json.jobsCreated} jobs. Run the cron to generate content.`
-      );
+   alert(
+  `Added ${json.inserted} leads and created ${json.emailsCreated || 0} email drafts.`
+);
+
 
       setBulkInput("");
       await new Promise((r) => setTimeout(r, 250));

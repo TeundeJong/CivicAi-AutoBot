@@ -1,29 +1,50 @@
 // src/pages/api/admin/bulk-leads.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabaseAdmin";
-import { enqueueJob } from "../../../lib/jobs";
+import { generateSalesEmail } from "../../../lib/openaiClient";
 
-// Helper om 1 regel te parsen:
-// - "Name, Company, email@domain.com"
-// - of alleen "email@domain.com"
-function parseLine(line: string) {
-  const trimmed = line.trim();
-  if (!trimmed) return null;
+type ParsedRow = {
+  email: string;
+  name: string | null;
+  company: string | null;
+};
 
-  // Als er geen komma staat: neem het hele ding als e-mail
-  if (!trimmed.includes(",")) {
-    if (!trimmed.includes("@")) return null;
-    return { email: trimmed, name: null, company: null };
-  }
+function parseLines(lines: string): ParsedRow[] {
+  return lines
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((line) => {
+      if (!line.includes("@")) return null;
 
-  const parts = trimmed.split(",").map((p) => p.trim());
-  const email = parts[parts.length - 1];
-  if (!email || !email.includes("@")) return null;
+      const parts = line.split(",").map((p) => p.trim()).filter(Boolean);
 
-  const name = parts[0] || null;
-  const company = parts.length > 2 ? parts[1] || null : null;
+      // zoek iets met @ erin
+      let emailPart = parts.find((p) => p.includes("@"));
+      if (!emailPart) {
+        emailPart = line.trim();
+      }
+      const email = emailPart.toLowerCase();
 
-  return { email, name, company };
+      let name: string | null = null;
+      let company: string | null = null;
+
+      // simpele interpretatie: "Name, Company, email"
+      if (parts.length >= 2) {
+        if (parts[0] && parts[0] !== emailPart) {
+          name = parts[0];
+        }
+        if (parts[1] && parts[1] !== emailPart) {
+          company = parts[1];
+        }
+      }
+
+      return { email, name, company };
+    })
+    .filter(
+      (row): row is ParsedRow =>
+        !!row && !!row.email && row.email.includes("@")
+    );
 }
 
 export default async function handler(
@@ -36,70 +57,80 @@ export default async function handler(
   }
 
   try {
-    const { lines, makeJobs } = (req.body || {}) as {
-      lines?: string;
-      makeJobs?: boolean;
-    };
+    const { lines } = (req.body || {}) as { lines?: string };
 
-    if (!lines || typeof lines !== "string") {
+    if (!lines || !lines.trim()) {
       return res.status(400).json({ error: "No lines provided" });
     }
 
-    // 1) Regels opschonen
-    const rows = lines
-      .split("\n")
-      .map((l) => parseLine(l))
-      .filter(Boolean) as { email: string; name: string | null; company: string | null }[];
+    const parsed = parseLines(lines);
 
-    if (!rows.length) {
+    if (!parsed.length) {
       return res
         .status(400)
-        .json({ error: "No valid email lines found in input" });
+        .json({ error: "No valid e-mail addresses found in input" });
     }
 
-    // 2) Leads inserten
-    const { data: insertedLeads, error: leadErr } = await supabaseAdmin
+    // 1) Leads inserten
+    const { data: insertedLeads, error: leadsError } = await supabaseAdmin
       .from("leads")
       .insert(
-        rows.map((r) => ({
-          email: r.email.toLowerCase(),
+        parsed.map((r) => ({
+          email: r.email,
           name: r.name,
           company: r.company,
         }))
       )
       .select("id, email, name, company");
 
-    if (leadErr) {
-      console.error("Lead insert error:", leadErr);
-      return res.status(500).json({ error: leadErr.message });
+    if (leadsError || !insertedLeads) {
+      console.error("Insert leads error:", leadsError);
+      return res
+        .status(500)
+        .json({ error: leadsError?.message || "Insert leads failed" });
     }
 
-    let jobsCreated = 0;
+    // 2) Voor elke lead direct een e-mail laten schrijven en als draft in email_outbox zetten
+    let emailsCreated = 0;
 
-    // 3) Optioneel: jobs aanmaken in marketing_jobs
-    if (makeJobs && insertedLeads && insertedLeads.length > 0) {
-      for (const lead of insertedLeads) {
-        await enqueueJob({
-          type: "GENERATE_EMAIL",
-          leadId: lead.id,
-          payload: {
-            language: "en", // alles gewoon Engels, zoals jij wilde
-            autoApprove: true,
-            extraContext: "First contact for ContractGuard AI.",
-          },
+    for (const lead of insertedLeads) {
+      try {
+        const { subject, body } = await generateSalesEmail({
+          language: "en", // alles Engels, zoals jij wilde
+          leadName: lead.name,
+          company: lead.company,
+          extraContext: "First contact for ContractGuard AI.",
         });
-        jobsCreated++;
+
+        const { error: outErr } = await supabaseAdmin
+          .from("email_outbox")
+          .insert({
+            to_email: lead.email,
+            subject,
+            body,
+            status: "draft", // jij keurt ze daarna goed
+            lead_id: lead.id,
+          });
+
+        if (outErr) {
+          console.error("email_outbox insert error for", lead.email, outErr);
+          continue;
+        }
+
+        emailsCreated++;
+      } catch (err) {
+        console.error("generateSalesEmail failed for", lead.email, err);
       }
     }
 
     return res.status(200).json({
-      inserted: insertedLeads?.length || 0,
-      jobsCreated,
+      inserted: insertedLeads.length,
+      emailsCreated,
     });
   } catch (err: any) {
     console.error("bulk-leads error:", err);
     return res
       .status(500)
-      .json({ error: err.message || "Unknown error" });
+      .json({ error: err.message || "Unknown server error" });
   }
 }
