@@ -1,6 +1,7 @@
 // src/pages/api/admin/bulk-csv.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabaseAdmin";
+import { enqueueJob } from "../../../lib/jobs";
 
 type RowInput = {
   email?: string | null;
@@ -27,70 +28,52 @@ export default async function handler(
       return res.status(400).json({ error: "No rows provided" });
     }
 
-    // ---- CLEAN / VALIDATE ----
-    const leadsToInsert = rows
+    const leadsToUpsert = rows
       .map((r) => {
         const email = r.email?.trim().toLowerCase();
         if (!email || !email.includes("@")) return null;
-
         return {
           email,
           name: r.name?.trim() || null,
           company: r.company?.trim() || null,
         };
       })
-      .filter(Boolean) as {
-      email: string;
-      name: string | null;
-      company: string | null;
-    }[];
+      .filter(Boolean) as { email: string; name: string | null; company: string | null }[];
 
-    if (!leadsToInsert.length) {
+    if (!leadsToUpsert.length) {
       return res.status(400).json({ error: "No valid emails" });
     }
 
-    // ---- INSERT LEADS ----
-    const { data: insertedLeads, error: leadErr } = await supabaseAdmin
+    const { data: leads, error: upsertErr } = await supabaseAdmin
       .from("leads")
-      .insert(leadsToInsert)
+      .upsert(leadsToUpsert, { onConflict: "email" })
       .select("id, email, name, company");
 
-    if (leadErr) {
-      console.error("Lead insert error:", leadErr);
-      return res.status(500).json({ error: leadErr.message });
+    if (upsertErr) {
+      console.error("bulk-csv upsert error:", upsertErr);
+      return res.status(500).json({ error: upsertErr.message });
     }
 
+    const insertedLeads = leads || [];
     let jobsCreated = 0;
 
-    // ---- OPTIONAL: CREATE JOBS ----
     if (makeJobs) {
-      const jobs = (insertedLeads || []).map((lead) => ({
-        type: "GENERATE_EMAIL",
-        status: "pending", // <-- belangrijk voor marketing_jobs
-        lead_id: lead.id,
-        payload: {
-          language: lead.email.endsWith(".nl") ? "nl" : "en",
-          autoApprove: true,
-          extraContext: "First contact for ContractGuard AI.",
-        },
-      }));
-
-      if (jobs.length) {
-        const { error: jobsErr } = await supabaseAdmin
-          .from("marketing_jobs") // <-- gebruik marketing_jobs
-          .insert(jobs);
-
-        if (jobsErr) {
-          console.error("Job insert error:", jobsErr);
-          return res.status(500).json({ error: jobsErr.message });
-        }
+      for (const lead of insertedLeads) {
+        await enqueueJob({
+          type: "GENERATE_EMAIL",
+          leadId: lead.id,
+          payload: {
+            language: "en",
+            autoApprove: true,
+            extraContext: "First contact for ContractGuard AI.",
+          },
+        });
+        jobsCreated++;
       }
-
-      jobsCreated = jobs.length;
     }
 
     return res.status(200).json({
-      inserted: leadsToInsert.length,
+      inserted: insertedLeads.length,
       jobsCreated,
     });
   } catch (err: any) {
