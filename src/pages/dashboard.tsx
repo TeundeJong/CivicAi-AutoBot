@@ -506,61 +506,62 @@ function EmailSection(props: EmailSectionProps) {
                       {e.status.toUpperCase()}
                     </td>
                     <td
-                      style={{
-                        padding: "0.5rem",
-                        textAlign: "right",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {e.status === "draft" && (
-                        <>
-                          <button
-                            onClick={() => updateStatus(e.id, "approved")}
-                            style={{
-                              padding: "0.25rem 0.6rem",
-                              borderRadius: "999px",
-                              border: "none",
-                              background: "#16a34a",
-                              fontSize: "0.75rem",
-                              marginRight: "0.25rem",
-                              cursor: "pointer",
-                              color: "#f9fafb",
-                            }}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => updateStatus(e.id, "declined")}
-                            style={{
-                              padding: "0.25rem 0.6rem",
-                              borderRadius: "999px",
-                              border: "none",
-                              background: "#b91c1c",
-                              fontSize: "0.75rem",
-                              cursor: "pointer",
-                              color: "#f9fafb",
-                            }}
-                          >
-                            Decline
-                          </button>
-                        </>
-                      )}
-                      {e.status === "approved" && (
-                        <button
-                          onClick={() => updateStatus(e.id, "draft")}
-                          style={{
-                            padding: "0.25rem 0.6rem",
-                            borderRadius: "999px",
-                            border: "none",
-                            background: "#4b5563",
-                            fontSize: "0.75rem",
-                            cursor: "pointer",
-                            color: "#f9fafb",
-                          }}
-                        >
-                          Terug naar draft
-                        </button>
-                      )}
+  style={{
+    padding: "0.5rem",
+    textAlign: "right",
+    whiteSpace: "nowrap",
+  }}
+>
+  {e.status === "draft" && (
+    <>
+      <button
+        onClick={() => updateStatus(e.id, "approved")}
+        style={{
+          padding: "0.25rem 0.6rem",
+          borderRadius: "999px",
+          border: "none",
+          background: "#16a34a",
+          fontSize: "0.75rem",
+          marginRight: "0.25rem",
+          cursor: "pointer",
+          color: "#f9fafb",
+        }}
+      >
+        Approve
+      </button>
+      <button
+        onClick={() => updateStatus(e.id, "declined")}
+        style={{
+          padding: "0.25rem 0.6rem",
+          borderRadius: "999px",
+          border: "none",
+          background: "#b91c1c",
+          fontSize: "0.75rem",
+          cursor: "pointer",
+          color: "#f9fafb",
+        }}
+      >
+        Decline
+      </button>
+    </>
+  )}
+
+  {(e.status === "approved" || e.status === "declined") && (
+    <button
+      onClick={() => updateStatus(e.id, "draft")}
+      style={{
+        padding: "0.25rem 0.6rem",
+        borderRadius: "999px",
+        border: "none",
+        background: "#4b5563",
+        fontSize: "0.75rem",
+        cursor: "pointer",
+        color: "#f9fafb",
+      }}
+    >
+      Back to draft
+    </button>
+  )}
                     </td>
                   </tr>
                 ))}
