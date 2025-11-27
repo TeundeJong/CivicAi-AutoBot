@@ -1,5 +1,6 @@
 // src/pages/dashboard.tsx
 import { useEffect, useState } from "react";
+import Papa from "papaparse";          // ← erbij
 
 type EmailStatus = "draft" | "approved" | "sent" | "failed" | "declined";
 type LinkedInStatus = "draft" | "approved" | "used" | "declined" | "all";
@@ -42,6 +43,7 @@ export default function DashboardPage() {
   // --------- BULK LEADS ---------
   const [bulkInput, setBulkInput] = useState("");
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
 
   async function handleCSVUpload(e: React.ChangeEvent<HTMLInputElement>) {
   const file = e.target.files?.[0];
@@ -63,39 +65,112 @@ export default function DashboardPage() {
 
 
   async function handleBulkImport() {
-    if (!bulkInput.trim()) {
-      alert("Plak eerst een paar e-mailadressen.");
-      return;
-    }
-
+  // 1) Eerst: CSV-bestand?
+  if (bulkFile) {
     setBulkLoading(true);
     try {
-      const res = await fetch("/api/admin/bulk-leads", {
+      // CSV inlezen
+      const text = await bulkFile.text();
+      const parsed = Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+      });
+
+      const rows = (parsed.data as any[])
+        .map((row) => {
+          const email =
+            row.email ||
+            row.Email ||
+            row["Email"] ||
+            row["Email Address"];
+
+          const name =
+            row.name ||
+            row.Name ||
+            row["First Name"] ||
+            row["First_Name"] ||
+            null;
+
+          const company =
+            row.company ||
+            row.Company ||
+            row["Company Name"] ||
+            null;
+
+          return { email, name, company };
+        })
+        .filter((r) => r.email && String(r.email).includes("@"));
+
+      if (!rows.length) {
+        alert("Geen geldige e-mailadressen in de CSV gevonden.");
+        return;
+      }
+
+      const res = await fetch("/api/admin/bulk-csv", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lines: bulkInput,
-          makeJobs: true, // tegelijk e-mail + DM jobs maken
+          rows,
+          makeJobs: true, // e-mail + DM jobs
         }),
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Bulk import failed");
+      if (!res.ok) throw new Error(json.error || "Bulk CSV failed");
 
       alert(
-        `Added ${json.inserted} leads and created ${json.jobsCreated} jobs. Run the cron to generate content.`
+        `CSV: ${json.inserted} leads en ${json.jobsCreated} jobs aangemaakt.`
       );
 
-      setBulkInput("");
-      if (activeTab === "emails") {
-        await loadEmails(); // << let op: GEEN argument meer
-      }
+      // reset file + input
+      setBulkFile(null);
+      const inputEl = document.getElementById(
+        "bulk-file-input"
+      ) as HTMLInputElement | null;
+      if (inputEl) inputEl.value = "";
+
+      // e-mails opnieuw laden
+      await loadEmails();
+      return; // klaar, niet meer naar de textarea-mode gaan
     } catch (err: any) {
-      alert(err.message || "Unknown error");
+      alert(err.message || "Unknown CSV error");
     } finally {
       setBulkLoading(false);
     }
   }
+
+  // 2) Geen CSV: dan de oude textarea-mode gebruiken
+  if (!bulkInput.trim()) {
+    alert("Plak eerst een paar e-mailadressen of upload een CSV.");
+    return;
+  }
+
+  setBulkLoading(true);
+  try {
+    const res = await fetch("/api/admin/bulk-leads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lines: bulkInput,
+        makeJobs: true,
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Bulk import failed");
+
+    alert(
+      `Added ${json.inserted} leads and created ${json.jobsCreated} jobs. Run the cron to generate content.`
+    );
+
+    setBulkInput("");
+    await loadEmails();
+  } catch (err: any) {
+    alert(err.message || "Unknown error");
+  } finally {
+    setBulkLoading(false);
+  }
+}
 
   
 
@@ -368,9 +443,10 @@ useEffect(() => {
           placeholder={`Example:\nJohn Smith, ACME Corp, john@acme.com\ninfo@contractlawyer.com`}
         />
 <input
+  id="bulk-file-input"
   type="file"
-  accept=".csv"
-  onChange={handleCSVUpload}
+  accept=".csv,text/csv"
+  onChange={(e) => setBulkFile(e.target.files?.[0] ?? null)}
   style={{
     marginTop: "1rem",
     padding: "0.4rem",
@@ -380,6 +456,7 @@ useEffect(() => {
     color: "#fff",
   }}
 />
+
 
         <button
           onClick={handleBulkImport}

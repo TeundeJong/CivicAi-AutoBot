@@ -25,8 +25,8 @@ export async function generateSalesEmail(options: {
       : "You are a B2B sales copywriter. You write short, concrete, friendly outreach emails about ContractGuard AI.";
 
   const prompt =
-    language === "nl"
-      ? `Schrijf een korte eerste outreach e-mail over ContractGuard AI.
+  language === "nl"
+    ? `Schrijf een korte eerste outreach e-mail over ContractGuard AI.
       
 Naam: ${leadName || "-"}
 Bedrijf: ${company || "-"}
@@ -36,8 +36,13 @@ Regels:
 - Max 140 woorden
 - Onderwerp: 1 sterke, duidelijke zin
 - Geen agressieve sales, wel duidelijk nut
-- Eindig met een simpele call-to-action (bijv. 'Zal ik je een korte demo sturen?').`
-      : `Write a short first outreach email about ContractGuard AI.
+- Eindig met een simpele call-to-action (bijv. 'Zal ik je een korte demo sturen?').
+- Eindig altijd met:
+  "Met vriendelijke groet,
+   Teun – CivicAi Solutions"`
+
+
+: `Write a short first outreach email about ContractGuard AI.
 
 Name: ${leadName || "-"}
 Company: ${company || "-"}
@@ -47,7 +52,12 @@ Rules:
 - Max 140 words
 - Subject: 1 strong, clear line
 - Not pushy, but clear value
-- End with a simple call-to-action (e.g. "Would you like a short demo?").`;
+- End with a simple call-to-action (e.g. "Would you like a short demo?").
+- Always end with:
+  "Best regards,
+   Teun – CivicAi Solutions"`
+
+
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
