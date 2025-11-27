@@ -37,9 +37,8 @@ export default async function handler(
         if (!lead?.email) throw new Error("Lead heeft geen email");
 
         // 3) E-mail laten schrijven
-        const payload: any = job.payload || {};
-        const language: "nl" | "en" =
-          (payload.language as "nl" | "en") || "en";
+          const payload: any = job.payload || {};
+        const language: "en" = "en"; // altijd Engels
 
         const { subject, body } = await generateSalesEmail({
           language,

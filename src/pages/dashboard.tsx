@@ -564,6 +564,7 @@ export default function DashboardPage() {
         />
       ) : (
         <LinkedInSection
+        
           type={activeTab === "linkedin_posts" ? "post" : "dm"}
           items={linkedinSource}
           loading={linkedinLoading}
@@ -771,6 +772,70 @@ function EmailSection(props: EmailSectionProps) {
     updateStatus,
     onOpenEmail,
   } = props;
+  async function handleBulkStatus(
+    status: EmailStatus,
+    limit?: number
+  ) {
+    const source =
+      filter === "all" ? emails : emails.filter((e) => e.status === filter);
+
+    const slice = typeof limit === "number" ? source.slice(0, limit) : source;
+    const ids = slice.map((e) => e.id);
+
+    if (!ids.length) {
+      alert("Geen e-mails om te updaten voor deze selectie.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/admin/email-bulk-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, status }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Bulk update failed");
+      await reload();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Bulk update error");
+    }
+  }
+
+  async function handleSendBatchNow() {
+    try {
+      const res = await fetch("/api/admin/email-send-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 50 }), // max 50 per klik, rest vangt cron op
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Send batch failed");
+      alert(
+        `Batch send: ${json.sent} e-mails verstuurd vanaf ${json.from || "account"}`
+      );
+      await reload();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Send batch error");
+    }
+  }
+
+  async function handleSendSingleNow(id: string) {
+    try {
+      const res = await fetch("/api/admin/email-send-now", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Send now failed");
+      await reload();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Send now error");
+    }
+  }
 
   const visibleEmails =
     filter === "all" ? emails : emails.filter((e) => e.status === filter);
@@ -818,13 +883,14 @@ function EmailSection(props: EmailSectionProps) {
 
       {/* Filters + refresh */}
       <section>
-        <div
+              <div
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
             marginBottom: "0.75rem",
             gap: "0.75rem",
+            flexWrap: "wrap",
           }}
         >
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -852,21 +918,107 @@ function EmailSection(props: EmailSectionProps) {
               </button>
             ))}
           </div>
-          <button
-            onClick={reload}
+
+          <div
             style={{
-              padding: "0.35rem 0.8rem",
-              borderRadius: "999px",
-              border: "1px solid #4b5563",
-              fontSize: "0.8rem",
-              cursor: "pointer",
-              background: "transparent",
-              color: "#e5e7eb",
+              display: "flex",
+              gap: "0.5rem",
+              alignItems: "center",
+              flexWrap: "wrap",
             }}
           >
-            Refresh
-          </button>
+            {/* Bulk approve knoppen */}
+            <div style={{ display: "flex", gap: "0.25rem" }}>
+              <button
+                onClick={() => handleBulkStatus("approved", 10)}
+                style={{
+                  padding: "0.25rem 0.6rem",
+                  borderRadius: "999px",
+                  border: "1px solid #16a34a",
+                  background: "transparent",
+                  fontSize: "0.75rem",
+                  cursor: "pointer",
+                  color: "#bbf7d0",
+                }}
+              >
+                Approve 10
+              </button>
+              <button
+                onClick={() => handleBulkStatus("approved", 25)}
+                style={{
+                  padding: "0.25rem 0.6rem",
+                  borderRadius: "999px",
+                  border: "1px solid #16a34a",
+                  background: "transparent",
+                  fontSize: "0.75rem",
+                  cursor: "pointer",
+                  color: "#bbf7d0",
+                }}
+              >
+                Approve 25
+              </button>
+              <button
+                onClick={() => handleBulkStatus("approved", 50)}
+                style={{
+                  padding: "0.25rem 0.6rem",
+                  borderRadius: "999px",
+                  border: "1px solid #16a34a",
+                  background: "transparent",
+                  fontSize: "0.75rem",
+                  cursor: "pointer",
+                  color: "#bbf7d0",
+                }}
+              >
+                Approve 50
+              </button>
+              <button
+                onClick={() => handleBulkStatus("approved")}
+                style={{
+                  padding: "0.25rem 0.6rem",
+                  borderRadius: "999px",
+                  border: "1px solid #16a34a",
+                  background: "transparent",
+                  fontSize: "0.75rem",
+                  cursor: "pointer",
+                  color: "#bbf7d0",
+                }}
+              >
+                Approve all
+              </button>
+            </div>
+
+            <button
+              onClick={handleSendBatchNow}
+              style={{
+                padding: "0.3rem 0.9rem",
+                borderRadius: "999px",
+                border: "1px solid #4b5563",
+                fontSize: "0.8rem",
+                cursor: "pointer",
+                background: "#111827",
+                color: "#e5e7eb",
+              }}
+            >
+              Send batch now
+            </button>
+
+            <button
+              onClick={reload}
+              style={{
+                padding: "0.35rem 0.8rem",
+                borderRadius: "999px",
+                border: "1px solid #4b5563",
+                fontSize: "0.8rem",
+                cursor: "pointer",
+                background: "transparent",
+                color: "#e5e7eb",
+              }}
+            >
+              Refresh
+            </button>
+          </div>
         </div>
+
 
         {error && (
           <div
@@ -1034,6 +1186,24 @@ function EmailSection(props: EmailSectionProps) {
                         </>
                       )}
 
+                                            {e.status === "approved" && (
+                        <button
+                          onClick={() => handleSendSingleNow(e.id)}
+                          style={{
+                            padding: "0.25rem 0.6rem",
+                            borderRadius: "999px",
+                            border: "none",
+                            background: "#0ea5e9",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            color: "#0f172a",
+                            marginRight: "0.25rem",
+                          }}
+                        >
+                          Send now
+                        </button>
+                      )}
+
                       {(e.status === "approved" ||
                         e.status === "declined") && (
                         <button
@@ -1051,6 +1221,7 @@ function EmailSection(props: EmailSectionProps) {
                           Back to draft
                         </button>
                       )}
+
                     </td>
                   </tr>
                 ))}
@@ -1095,6 +1266,27 @@ function LinkedInSection(props: LinkedInSectionProps) {
       ? "Buffer aan LinkedIn posts die je zelf kunt kopiëren en plaatsen."
       : "Korte DM-teksten om handmatig in LinkedIn te plakken en te versturen.";
 
+  async function handleGenerate(count: number) {
+    try {
+      const res = await fetch("/api/admin/linkedin-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, count }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Generate failed");
+      alert(
+        `Generated ${json.inserted} LinkedIn ${
+          type === "post" ? "posts" : "DMs"
+        }.`
+      );
+      await reload();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "LinkedIn generate error");
+    }
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       {/* Stat cards */}
@@ -1134,7 +1326,7 @@ function LinkedInSection(props: LinkedInSectionProps) {
         ))}
       </section>
 
-      {/* Titel + filters */}
+      {/* Titel + filters + generate */}
       <section>
         <div
           style={{
@@ -1143,13 +1335,12 @@ function LinkedInSection(props: LinkedInSectionProps) {
             alignItems: "flex-end",
             marginBottom: "0.75rem",
             gap: "0.75rem",
+            flexWrap: "wrap",
           }}
         >
           <div>
             <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>{title}</h2>
-            <p
-              style={{ fontSize: "0.85rem", color: "#9ca3af" }}
-            >
+            <p style={{ fontSize: "0.85rem", color: "#9ca3af" }}>
               {description}
             </p>
           </div>
@@ -1159,8 +1350,24 @@ function LinkedInSection(props: LinkedInSectionProps) {
               display: "flex",
               gap: "0.5rem",
               alignItems: "center",
+              flexWrap: "wrap",
             }}
           >
+            <button
+              onClick={() => handleGenerate(type === "post" ? 10 : 20)}
+              style={{
+                padding: "0.3rem 0.8rem",
+                borderRadius: "999px",
+                border: "1px solid #6366f1",
+                fontSize: "0.8rem",
+                cursor: "pointer",
+                background: "#111827",
+                color: "#e5e7eb",
+              }}
+            >
+              Generate {type === "post" ? "10 posts" : "20 DMs"}
+            </button>
+
             <select
               value={filter}
               onChange={(e) => setFilter(e.target.value as LinkedInStatus)}

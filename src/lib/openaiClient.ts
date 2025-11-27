@@ -117,3 +117,54 @@ Teun – CivicAi Solutions`;
 
   return { subject, body: cleanedBody };
 }
+// onderaan src/lib/openaiClient.ts
+
+export async function generateLinkedInPost() {
+  const sys =
+    "You are a B2B LinkedIn content marketer for ContractGuard AI. You write short, punchy posts.";
+
+  const prompt = `
+Write ONE LinkedIn post about ContractGuard AI.
+
+Audience: small business owners, freelancers, lawyers who deal with contracts.
+Goal: awareness + curiosity, not hard selling.
+Rules:
+- Max 120 words
+- No hashtags or emojis at the start, 1–3 at the end is OK
+- Make it feel personal and human
+`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: prompt },
+    ],
+  });
+
+  return completion.choices[0].message.content || "";
+}
+
+export async function generateLinkedInDM() {
+  const sys =
+    "You are a B2B LinkedIn sales copywriter for ContractGuard AI. You write short, friendly DMs.";
+
+  const prompt = `
+Write ONE short LinkedIn DM to someone who regularly has to read contracts.
+
+Rules:
+- Max 90 words
+- Friendly and low-pressure
+- Mention ContractGuard AI as a way to scan contracts for risks and action points
+- End with a soft question like "Would it be okay if I send you a quick demo link?"`;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: prompt },
+    ],
+  });
+
+  return completion.choices[0].message.content || "";
+}
