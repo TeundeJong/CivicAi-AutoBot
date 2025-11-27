@@ -93,35 +93,39 @@ export default async function handler(
     // 2) Voor elke lead direct een e-mail laten schrijven en als draft in email_outbox zetten
     let emailsCreated = 0;
 
-    for (const lead of insertedLeads) {
-      try {
-        const { subject, body } = await generateSalesEmail({
-          language: "en", // alles Engels, zoals jij wilde
-          leadName: lead.name,
-          company: lead.company,
-          extraContext: "First contact for ContractGuard AI.",
+// alles parallel draaien, zodat het niet lead-voor-lead hoeft
+await Promise.all(
+  insertedLeads.map(async (lead) => {
+    try {
+      const { subject, body } = await generateSalesEmail({
+        language: "en", // alles Engels
+        leadName: lead.name,
+        company: lead.company,
+        extraContext: "First contact for ContractGuard AI.",
+      });
+
+      const { error: outErr } = await supabaseAdmin
+        .from("email_outbox")
+        .insert({
+          to_email: lead.email,
+          subject,
+          body,
+          status: "draft", // jij keurt daarna goed
+          lead_id: lead.id,
         });
 
-        const { error: outErr } = await supabaseAdmin
-          .from("email_outbox")
-          .insert({
-            to_email: lead.email,
-            subject,
-            body,
-            status: "draft", // jij keurt ze daarna goed
-            lead_id: lead.id,
-          });
-
-        if (outErr) {
-          console.error("email_outbox insert error for", lead.email, outErr);
-          continue;
-        }
-
-        emailsCreated++;
-      } catch (err) {
-        console.error("generateSalesEmail failed for", lead.email, err);
+      if (outErr) {
+        console.error("email_outbox insert error for", lead.email, outErr);
+        return;
       }
+
+      emailsCreated++;
+    } catch (err) {
+      console.error("generateSalesEmail failed for", lead.email, err);
     }
+  })
+);
+
 
     return res.status(200).json({
       inserted: insertedLeads.length,
