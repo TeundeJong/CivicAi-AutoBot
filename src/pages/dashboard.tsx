@@ -43,6 +43,25 @@ export default function DashboardPage() {
   const [bulkInput, setBulkInput] = useState("");
   const [bulkLoading, setBulkLoading] = useState(false);
 
+  async function handleCSVUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch("/api/admin/bulk-csv", {
+    method: "POST",
+    body: formData,
+  });
+
+  const json = await res.json();
+  alert(`Imported ${json.inserted} leads + ${json.jobsCreated} jobs`);
+
+  await loadEmails();
+}
+
+
   async function handleBulkImport() {
     if (!bulkInput.trim()) {
       alert("Plak eerst een paar e-mailadressen.");
@@ -348,6 +367,19 @@ useEffect(() => {
           }}
           placeholder={`Example:\nJohn Smith, ACME Corp, john@acme.com\ninfo@contractlawyer.com`}
         />
+<input
+  type="file"
+  accept=".csv"
+  onChange={handleCSVUpload}
+  style={{
+    marginTop: "1rem",
+    padding: "0.4rem",
+    border: "1px solid #333",
+    borderRadius: "8px",
+    background: "#111",
+    color: "#fff",
+  }}
+/>
 
         <button
           onClick={handleBulkImport}
