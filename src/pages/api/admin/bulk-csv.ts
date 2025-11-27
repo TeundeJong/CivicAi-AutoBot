@@ -1,83 +1,84 @@
-import type { NextApiRequest, NextApiResponse } from "next";
+// /api/admin/bulk-csv.ts
+
+import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "../../../lib/supabaseAdmin";
-import Papa from "papaparse";
-
-export const config = {
-  api: {
-    bodyParser: false, // belangrijk voor file upload!
-  },
-};
-
-async function readFile(req: NextApiRequest): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk) => (data += chunk));
-    req.on("end", () => resolve(data));
-    req.on("error", reject);
-  });
-}
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST")
-    return res.status(405).json({ error: "Method not allowed" });
-
+export async function POST(req: NextRequest) {
   try {
-    const csvText = await readFile(req);
+    const body = await req.json();
+    const rows = body.rows || [];
+    const makeJobs = body.makeJobs ?? false;
 
-    const parsed = Papa.parse(csvText, {
-      header: true,
-      skipEmptyLines: true,
-    });
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return NextResponse.json(
+        { error: "No rows provided" },
+        { status: 400 }
+      );
+    }
 
-    const rows = parsed.data as any[];
-
+    // ---- Leads cleanen ----
     const leadsToInsert = rows
       .map((r) => {
-        const email = r.Email || r.email || r["Email Address"];
+        const email = r.email?.trim()?.toLowerCase();
         if (!email || !email.includes("@")) return null;
 
         return {
           email,
-          name: `${r["First Name"] || ""} ${r["Last Name"] || ""}`.trim() || null,
-          company: r.Company || null,
+          name: r.name || null,
+          company: r.company || null,
         };
       })
       .filter(Boolean);
 
-    if (!leadsToInsert.length)
-      return res.status(400).json({ error: "No leads found in CSV" });
-
-    const { data: inserted, error } = await supabaseAdmin
-      .from("leads")
-      .insert(leadsToInsert)
-      .select("id");
-
-    if (error) throw error;
-
-    let jobs = 0;
-    for (const lead of inserted) {
-      await supabaseAdmin.from("marketing_jobs").insert([
-        {
-          type: "GENERATE_EMAIL",
-          status: "pending",
-          lead_id: lead.id,
-          payload: { language: "en", autoApprove: false },
-        },
-        {
-          type: "GENERATE_LINKEDIN_DM",
-          status: "pending",
-          lead_id: lead.id,
-          payload: { language: "en", autoApprove: false },
-        },
-      ]);
-      jobs += 2;
+    if (leadsToInsert.length === 0) {
+      return NextResponse.json(
+        { error: "No valid emails in rows" },
+        { status: 400 }
+      );
     }
 
-    return res.json({
-      inserted: inserted.length,
-      jobsCreated: jobs,
+    // ---- Insert leads ----
+    const { data: insertedLeads, error: leadErr } = await supabaseAdmin
+      .from("leads")
+      .insert(leadsToInsert)
+      .select("id, email, name, company");
+
+    if (leadErr) {
+      console.error("Lead insert error:", leadErr);
+      return NextResponse.json({ error: leadErr.message }, { status: 500 });
+    }
+
+    let jobsCreated = 0;
+
+    if (makeJobs) {
+      // 1 job per lead (emailDraft + dmDraft)
+      const jobs = insertedLeads.map((lead) => ({
+        type: "GENERATE_EMAIL",
+        lead_id: lead.id,
+        payload: {
+          autoApprove: true,
+          language: lead.email.endsWith(".nl") ? "nl" : "en",
+          extraContext: "First contact for ContractGuard AI.",
+        },
+      }));
+
+      const { error: jobsErr } = await supabaseAdmin.from("jobs").insert(jobs);
+      if (jobsErr) {
+        console.error("Job insert error:", jobsErr);
+        return NextResponse.json({ error: jobsErr.message }, { status: 500 });
+      }
+
+      jobsCreated = jobs.length;
+    }
+
+    return NextResponse.json({
+      inserted: leadsToInsert.length,
+      jobsCreated,
     });
-  } catch (e: any) {
-    return res.status(500).json({ error: e.message });
+  } catch (err: any) {
+    console.error("bulk-csv error:", err);
+    return NextResponse.json(
+      { error: err.message || "Unknown error" },
+      { status: 500 }
+    );
   }
 }
