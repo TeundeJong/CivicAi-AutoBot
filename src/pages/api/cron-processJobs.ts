@@ -1,38 +1,70 @@
-// src/pages/api/cron-processJobs.ts
+// src/pages/api/admin/cron-processJobs.ts
 import type { NextApiRequest, NextApiResponse } from "next";
+import { supabaseAdmin } from "../../lib/supabaseAdmin";
 import { getPendingJobs, markJobStatus } from "../../lib/jobs";
-import { processJob } from "../../lib/processors";
-
-const BATCH_SIZE = 10;
-
-export const config = {
-  api: { bodyParser: false },
-};
+import { generateSalesEmail } from "../../lib/openaiClient";
 
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  const auth = req.headers.authorization;
-  const secret = process.env.CRON_SECRET;
-
-  if (!auth || auth !== `Bearer ${secret}`) {
-    return res.status(401).json({ error: "Unauthorized" });
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const jobs = await getPendingJobs(BATCH_SIZE);
+    const limit = Number(req.body?.limit || 20);
+
+    // 1) Pending jobs ophalen
+    const jobs = await getPendingJobs(limit);
+
     let processed = 0;
+    let failed = 0;
 
     for (const job of jobs) {
       try {
-        // markeer als "processing"
+        // markeer als processing
         await markJobStatus(job.id, "processing");
 
-        // laat processors.ts bepalen wat er moet gebeuren
-        await processJob(job);
+        // 2) Lead erbij zoeken
+        const { data: lead, error: leadErr } = await supabaseAdmin
+          .from("leads")
+          .select("id, email, name, company")
+          .eq("id", job.lead_id)
+          .single();
 
-        // klaar
+        if (leadErr) throw leadErr;
+        if (!lead?.email) throw new Error("Lead heeft geen email");
+
+        // 3) E-mail laten schrijven
+        const payload: any = job.payload || {};
+        const language =
+          (payload.language as "nl" | "en") || ("en" as "en" | "nl");
+
+        const { subject, body } = await generateSalesEmail({
+          language,
+          leadName: lead.name,
+          company: lead.company,
+          extraContext: payload.extraContext,
+        });
+
+        // 4) E-mail in de outbox zetten
+        const status: "draft" | "approved" =
+          payload.autoApprove === true ? "approved" : "draft";
+
+        const { error: outErr } = await supabaseAdmin
+          .from("email_outbox")
+          .insert({
+            to_email: lead.email,
+            subject,
+            body,
+            status,
+            lead_id: lead.id,
+          });
+
+        if (outErr) throw outErr;
+
+        // 5) Job afronden
         await markJobStatus(job.id, "done");
         processed++;
       } catch (err: any) {
@@ -40,16 +72,21 @@ export default async function handler(
         await markJobStatus(
           job.id,
           "failed",
-          err?.message ?? "Unknown error"
+          err?.message || String(err || "unknown error")
         );
+        failed++;
       }
     }
 
-    return res.status(200).json({ processed });
-  } catch (e: any) {
-    console.error(e);
-    return res.status(500).json({
-      error: e?.message ?? "Unknown error",
+    return res.status(200).json({
+      totalJobsFetched: jobs.length,
+      processed,
+      failed,
     });
+  } catch (err: any) {
+    console.error(err);
+    return res
+      .status(500)
+      .json({ error: err?.message || "Failed to run jobs" });
   }
 }
