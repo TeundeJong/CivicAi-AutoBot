@@ -27,7 +27,7 @@ export async function generateSalesEmail(options: {
   const prompt =
     language === "nl"
       ? `Schrijf een korte eerste outreach e-mail over ContractGuard AI.
-      
+
 Naam: ${leadName || "-"}
 Bedrijf: ${company || "-"}
 Extra context: ${extraContext || "-"}
@@ -36,10 +36,8 @@ Regels:
 - Max 140 woorden
 - Onderwerp: 1 sterke, duidelijke zin
 - Geen agressieve sales, wel duidelijk nut
-- Eindig met een simpele call-to-action (bijv. 'Zal ik je een korte demo sturen?').
-- Eindig altijd met:
-  "Met vriendelijke groet,
-   Teun – CivicAi Solutions"`
+- Gebruik GEEN placeholders zoals "[Your name]" of "Best regards, Your name"
+- Eindig met een simpele call-to-action (bijv. "Zal ik je een korte demo sturen?").`
       : `Write a short first outreach email about ContractGuard AI.
 
 Name: ${leadName || "-"}
@@ -49,11 +47,9 @@ Extra context: ${extraContext || "-"}
 Rules:
 - Max 140 words
 - Subject: 1 strong, clear line
+- Do NOT use placeholders like "[Your name]" or "Best regards, Your name"
 - Not pushy, but clear value
-- End with a simple call-to-action (e.g. "Would you like a short demo?").
-- Always end with:
-  "Best regards,
-   Teun – CivicAi Solutions"`;
+- End with a simple call-to-action (e.g. "Would you like a short demo?").`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -63,40 +59,31 @@ Rules:
     ],
   });
 
-  // ---- Post-processing: signature & placeholders fixen ----
-  let text = completion.choices[0]?.message?.content || "";
+  let text = completion.choices[0].message.content || "";
 
-  // Normaliseer line endings
-  text = text.replace(/\r\n/g, "\n");
+  // 1) Haal eventuele standaard-handtekeningen weg
+  text = text.replace(
+    /(Best regards|Kind regards|Regards|Met vriendelijke groet(en)?)[\s\S]*$/i,
+    ""
+  ).trim();
 
-  // Vervang (your name) / your name → jouw echte naam + bedrijf
-  text = text
-    .replace(/\(your ?name\)/gi, "Teun – CivicAi Solutions")
-    .replace(/your name/gi, "Teun – CivicAi Solutions");
-
+  // 2) Voeg jouw vaste signature toe
   const signature =
     language === "nl"
-      ? `Met vriendelijke groet,\nTeun – CivicAi Solutions`
-      : `Best regards,\nTeun – CivicAi Solutions`;
+      ? "Met vriendelijke groet,\nTeun – CivicAi Solutions"
+      : "Best regards,\nTeun – CivicAi Solutions";
 
-  const lower = text.toLowerCase();
+  text = `${text}\n\n${signature}`;
 
-  // Als de juiste signature er nog niet in staat, voeg hem toe
-  if (
-    !lower.includes("teun – civicai solutions") &&
-    !lower.includes("teun - civicai solutions")
-  ) {
-    text += `\n\n${signature}`;
-  }
+  // 3) Eerste regel als subject, rest als body
+  const lines = text.split("\n").filter((l) => l.trim() !== "");
+  const firstLine = lines[0] || "";
+  const rest = lines.slice(1).join("\n").trim();
 
-  // ---- Subject + body eruit halen zoals je al deed ----
-  const lines = text.split("\n").filter(Boolean);
-  const [firstLine, ...rest] = lines;
-  let subject = firstLine.replace(/^onderwerp[:\-]\s*/i, "").trim();
-  let body = rest.join("\n").trim();
+  let subject = firstLine.replace(/^subject[:\-]\s*/i, "").trim();
+  let body = rest;
 
   if (!subject || !body) {
-    // fallback: hele tekst als body
     subject =
       language === "nl"
         ? "ContractGuard AI – contracten sneller en veiliger"
