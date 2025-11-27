@@ -27,7 +27,7 @@ export async function generateSalesEmail(options: {
   const prompt =
     language === "nl"
       ? `Schrijf een korte eerste outreach e-mail over ContractGuard AI.
-
+      
 Naam: ${leadName || "-"}
 Bedrijf: ${company || "-"}
 Extra context: ${extraContext || "-"}
@@ -36,8 +36,11 @@ Regels:
 - Max 140 woorden
 - Onderwerp: 1 sterke, duidelijke zin
 - Geen agressieve sales, wel duidelijk nut
-- Gebruik GEEN placeholders zoals "[Your name]" of "Best regards, Your name"
-- Eindig met een simpele call-to-action (bijv. "Zal ik je een korte demo sturen?").`
+- Eindig met een simpele call-to-action (bijv. "Zal ik je een korte demo sturen?").
+- Eindig altijd met exact deze ondertekening:
+
+Met vriendelijke groet,
+Teun – CivicAi Solutions`
       : `Write a short first outreach email about ContractGuard AI.
 
 Name: ${leadName || "-"}
@@ -47,9 +50,12 @@ Extra context: ${extraContext || "-"}
 Rules:
 - Max 140 words
 - Subject: 1 strong, clear line
-- Do NOT use placeholders like "[Your name]" or "Best regards, Your name"
 - Not pushy, but clear value
-- End with a simple call-to-action (e.g. "Would you like a short demo?").`;
+- End with a simple call-to-action (e.g. "Would you like a short demo?").
+- Always end with exactly this signature:
+
+Best regards,
+Teun – CivicAi Solutions`;
 
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
@@ -59,31 +65,14 @@ Rules:
     ],
   });
 
-  let text = completion.choices[0].message.content || "";
+  const text = completion.choices[0].message.content || "";
 
-  // 1) Haal eventuele standaard-handtekeningen weg
-  text = text.replace(
-    /(Best regards|Kind regards|Regards|Met vriendelijke groet(en)?)[\s\S]*$/i,
-    ""
-  ).trim();
-
-  // 2) Voeg jouw vaste signature toe
-  const signature =
-    language === "nl"
-      ? "Met vriendelijke groet,\nTeun – CivicAi Solutions"
-      : "Best regards,\nTeun – CivicAi Solutions";
-
-  text = `${text}\n\n${signature}`;
-
-  // 3) Eerste regel als subject, rest als body
-  const lines = text.split("\n").filter((l) => l.trim() !== "");
-  const firstLine = lines[0] || "";
-  const rest = lines.slice(1).join("\n").trim();
-
-  let subject = firstLine.replace(/^subject[:\-]\s*/i, "").trim();
-  let body = rest;
+  const [firstLine, ...rest] = text.split("\n").filter(Boolean);
+  let subject = firstLine.replace(/^onderwerp[:\-]\s*/i, "").trim();
+  let body = rest.join("\n").trim();
 
   if (!subject || !body) {
+    // fallback
     subject =
       language === "nl"
         ? "ContractGuard AI – contracten sneller en veiliger"

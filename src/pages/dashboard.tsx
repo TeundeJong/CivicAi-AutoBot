@@ -37,7 +37,8 @@ export default function DashboardPage() {
   // -------- LINKEDIN STATE --------
   const [linkedinPosts, setLinkedinPosts] = useState<LinkedInItem[]>([]);
   const [linkedinDMs, setLinkedinDMs] = useState<LinkedInItem[]>([]);
-  const [linkedinFilter, setLinkedinFilter] = useState<LinkedInStatus>("draft");
+  const [linkedinFilter, setLinkedinFilter] =
+    useState<LinkedInStatus>("draft");
   const [linkedinLoading, setLinkedinLoading] = useState(false);
   const [linkedinError, setLinkedinError] = useState<string | null>(null);
 
@@ -46,29 +47,10 @@ export default function DashboardPage() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkFile, setBulkFile] = useState<File | null>(null);
 
-  // ---------- EMAIL LOADERS ----------
-
-  async function loadEmails() {
-    setEmailLoading(true);
-    setEmailError(null);
-    try {
-      // altijd ALLE e-mails ophalen
-      const res = await fetch(`/api/admin/emails`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to load emails");
-      setEmails(json.emails || []);
-    } catch (err: any) {
-      console.error(err);
-      setEmailError(err.message || "Error");
-    } finally {
-      setEmailLoading(false);
-    }
-  }
-
-  // ---------- BULK IMPORT (CSV + textarea) ----------
+  // ---------- BULK IMPORT ----------
 
   async function handleBulkImport() {
-    // 1) Eerst: CSV-bestand?
+    // 1) Als er een CSV-bestand is: eerst CSV → lines string maken
     if (bulkFile) {
       setBulkLoading(true);
       try {
@@ -80,17 +62,17 @@ export default function DashboardPage() {
 
         const rows = (parsed.data as any[])
           .map((row) => {
-            if (!row) return { email: null, name: null, company: null };
-
+            if (!row) return null;
             const keys = Object.keys(row);
 
-            // ---- EMAIL ----
             const emailKey =
               keys.find((k) => k.toLowerCase() === "email") ||
               keys.find((k) => k.toLowerCase().includes("email"));
-            const email = emailKey ? row[emailKey] : undefined;
+            const email = emailKey ? String(row[emailKey]).trim() : "";
 
-            // ---- NAME ----
+            if (!email || !email.includes("@")) return null;
+
+            // name
             let name =
               row.name ||
               row.Name ||
@@ -109,18 +91,16 @@ export default function DashboardPage() {
                   k.toLowerCase().includes("last") &&
                   k.toLowerCase().includes("name")
               );
-
               const first = firstKey ? row[firstKey] : "";
               const last = lastKey ? row[lastKey] : "";
               const combined = `${first ?? ""} ${last ?? ""}`.trim();
               name = combined || null;
             }
 
-            // ---- COMPANY ----
+            // company
             const companyKey =
               keys.find((k) => k.toLowerCase() === "company") ||
               keys.find((k) => k.toLowerCase().includes("company"));
-
             const company =
               row.company ||
               row.Company ||
@@ -128,9 +108,13 @@ export default function DashboardPage() {
               (companyKey ? row[companyKey] : null) ||
               null;
 
-            return { email, name, company };
+            return {
+              email: String(email),
+              name: name ? String(name) : "",
+              company: company ? String(company) : "",
+            };
           })
-          .filter((r) => r.email && String(r.email).includes("@"));
+          .filter(Boolean) as { email: string; name: string; company: string }[];
 
         if (!rows.length) {
           alert(
@@ -140,45 +124,58 @@ export default function DashboardPage() {
             "Eerste row keys:",
             Object.keys((parsed.data as any[])[0] || {})
           );
+          setBulkLoading(false);
           return;
         }
 
-        const res = await fetch("/api/admin/bulk-csv", {
+        // zelfde formaat als de textarea verwacht:
+        // "Name, Company, email@domain.com"
+        const lines = rows
+          .map((r) => {
+            if (r.name || r.company) {
+              return `${r.name || ""}, ${r.company || ""}, ${r.email}`;
+            }
+            return r.email;
+          })
+          .join("\n");
+
+        const res = await fetch("/api/admin/bulk-leads", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            rows,
-            makeJobs: true, // e-mail + DM jobs
+            lines,
+            makeJobs: true,
           }),
         });
 
         const json = await res.json();
-        if (!res.ok) throw new Error(json.error || "Bulk CSV failed");
+        if (!res.ok) throw new Error(json.error || "Bulk import failed");
 
         alert(
-          `CSV: ${json.inserted} leads en ${json.jobsCreated} jobs aangemaakt.`
+          `CSV import: ${json.inserted} leads en ${json.jobsCreated} jobs aangemaakt.`
         );
 
-        // reset file + input
+        // reset file + textarea
         const inputEl = document.getElementById(
           "bulk-file-input"
         ) as HTMLInputElement | null;
         if (inputEl) inputEl.value = "";
         setBulkFile(null);
+        setBulkInput("");
 
-        // kleine delay zodat inserts klaar zijn
         await new Promise((r) => setTimeout(r, 250));
-
         await loadEmails();
-        return; // niet meer naar textarea-mode
-      } catch (err: any) {
-        alert(err.message || "Unknown CSV error");
-      } finally {
         setBulkLoading(false);
+        return;
+      } catch (err: any) {
+        console.error(err);
+        alert(err.message || "Unknown CSV error");
+        setBulkLoading(false);
+        return;
       }
     }
 
-    // 2) Geen CSV: dan de oude textarea-mode gebruiken
+    // 2) Geen CSV: oude textarea-mode
     if (!bulkInput.trim()) {
       alert("Plak eerst een paar e-mailadressen of upload een CSV.");
       return;
@@ -203,13 +200,31 @@ export default function DashboardPage() {
       );
 
       setBulkInput("");
-
       await new Promise((r) => setTimeout(r, 250));
       await loadEmails();
     } catch (err: any) {
+      console.error(err);
       alert(err.message || "Unknown error");
     } finally {
       setBulkLoading(false);
+    }
+  }
+
+  // ---------- EMAIL LOADERS ----------
+
+  async function loadEmails() {
+    setEmailLoading(true);
+    setEmailError(null);
+    try {
+      const res = await fetch(`/api/admin/emails`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load emails");
+      setEmails(json.emails || []);
+    } catch (err: any) {
+      console.error(err);
+      setEmailError(err.message || "Error");
+    } finally {
+      setEmailLoading(false);
     }
   }
 
@@ -310,7 +325,8 @@ export default function DashboardPage() {
         background: "#020617",
         color: "#e5e7eb",
         padding: "1.5rem",
-        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+        fontFamily:
+          "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
       }}
     >
       {/* Topbar / nav */}
@@ -439,8 +455,8 @@ export default function DashboardPage() {
         >
           One contact per line. Format:{" "}
           <code>Name, Company, email@domain.com</code> or just{" "}
-          <code>email@domain.com</code>. The bot will create email drafts and
-          LinkedIn DM drafts for each lead.
+          <code>email@domain.com</code>. The bot will create email drafts
+          and LinkedIn DM drafts for each lead.
         </p>
 
         <textarea
@@ -555,6 +571,7 @@ function EmailSection(props: EmailSectionProps) {
     reload,
     updateStatus,
   } = props;
+
   const visibleEmails =
     filter === "all" ? emails : emails.filter((e) => e.status === filter);
 
@@ -624,7 +641,8 @@ function EmailSection(props: EmailSectionProps) {
                     filter === st
                       ? "1px solid #6366f1"
                       : "1px solid #1f2933",
-                  background: filter === st ? "#111827" : "transparent",
+                  background:
+                    filter === st ? "#111827" : "transparent",
                   fontSize: "0.8rem",
                   cursor: "pointer",
                   color: "#e5e7eb",
@@ -684,10 +702,18 @@ function EmailSection(props: EmailSectionProps) {
             <thead style={{ background: "#020617" }}>
               <tr>
                 <th style={{ padding: "0.5rem", textAlign: "left" }}>Lead</th>
-                <th style={{ padding: "0.5rem", textAlign: "left" }}>E-mail</th>
-                <th style={{ padding: "0.5rem", textAlign: "left" }}>Subject</th>
-                <th style={{ padding: "0.5rem", textAlign: "left" }}>Status</th>
-                <th style={{ padding: "0.5rem", textAlign: "right" }}>Acties</th>
+                <th style={{ padding: "0.5rem", textAlign: "left" }}>
+                  E-mail
+                </th>
+                <th style={{ padding: "0.5rem", textAlign: "left" }}>
+                  Subject
+                </th>
+                <th style={{ padding: "0.5rem", textAlign: "left" }}>
+                  Status
+                </th>
+                <th style={{ padding: "0.5rem", textAlign: "right" }}>
+                  Acties
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -792,7 +818,8 @@ function EmailSection(props: EmailSectionProps) {
                         </>
                       )}
 
-                      {(e.status === "approved" || e.status === "declined") && (
+                      {(e.status === "approved" ||
+                        e.status === "declined") && (
                         <button
                           onClick={() => updateStatus(e.id, "draft")}
                           style={{
@@ -869,7 +896,8 @@ function LinkedInSection(props: LinkedInSectionProps) {
               borderRadius: "0.75rem",
               padding: "0.9rem",
               border: "1px solid #111827",
-              background: "linear-gradient(to bottom right,#020617,#020617)",
+              background:
+                "linear-gradient(to bottom right,#020617,#020617)",
             }}
           >
             <div
@@ -903,7 +931,9 @@ function LinkedInSection(props: LinkedInSectionProps) {
         >
           <div>
             <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>{title}</h2>
-            <p style={{ fontSize: "0.85rem", color: "#9ca3af" }}>
+            <p
+              style={{ fontSize: "0.85rem", color: "#9ca3af" }}
+            >
               {description}
             </p>
           </div>
