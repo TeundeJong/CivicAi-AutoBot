@@ -40,24 +40,25 @@ export default function DashboardPage() {
   const [linkedinLoading, setLinkedinLoading] = useState(false);
   const [linkedinError, setLinkedinError] = useState<string | null>(null);
 
-  // ---------- EMAIL LOADERS ----------
 
-  async function loadEmails(status: EmailStatus | "all") {
-    setEmailLoading(true);
-    setEmailError(null);
-    try {
-      const qs = status === "all" ? "" : `?status=${status}`;
-      const res = await fetch(`/api/admin/emails${qs}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to load emails");
-      setEmails(json.emails || []);
-    } catch (err: any) {
-      console.error(err);
-      setEmailError(err.message || "Error");
-    } finally {
-      setEmailLoading(false);
-    }
+ // ---------- EMAIL LOADERS ----------
+async function loadEmails() {
+  setEmailLoading(true);
+  setEmailError(null);
+  try {
+    // altijd ALLE e-mails ophalen, geen status-filter in de API
+    const res = await fetch(`/api/admin/emails`);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Failed to load emails");
+    setEmails(json.emails || []);
+  } catch (err: any) {
+    console.error(err);
+    setEmailError(err.message || "Error");
+  } finally {
+    setEmailLoading(false);
   }
+}
+
 
   async function updateEmailStatus(id: string, status: EmailStatus) {
     try {
@@ -68,7 +69,7 @@ export default function DashboardPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed");
-      await loadEmails(emailFilter);
+      await loadEmails();
     } catch (err: any) {
       alert(err.message || "Kon e-mailstatus niet updaten");
     }
@@ -101,11 +102,12 @@ export default function DashboardPage() {
 
   // ---------- EFFECTS ----------
 
-  useEffect(() => {
-    if (activeTab === "emails") {
-      loadEmails(emailFilter);
-    }
-  }, [activeTab, emailFilter]);
+useEffect(() => {
+  if (activeTab === "emails") {
+    loadEmails();
+  }
+}, [activeTab]);
+
 
   useEffect(() => {
     if (activeTab === "linkedin_posts") {
@@ -263,16 +265,17 @@ export default function DashboardPage() {
 
       {/* ---- ACTIEVE TAB ---- */}
       {activeTab === "emails" ? (
-        <EmailSection
-          emails={emails}
-          loading={emailLoading}
-          error={emailError}
-          filter={emailFilter}
-          setFilter={setEmailFilter}
-          counters={emailCounters}
-          reload={() => loadEmails(emailFilter)}
-          updateStatus={updateEmailStatus}
-        />
+       <EmailSection
+  emails={emails}
+  loading={emailLoading}
+  error={emailError}
+  filter={emailFilter}
+  setFilter={setEmailFilter}
+  counters={emailCounters}
+  reload={loadEmails}
+  updateStatus={updateEmailStatus}
+/>
+
       ) : (
         <LinkedInSection
           type={activeTab === "linkedin_posts" ? "post" : "dm"}
@@ -319,6 +322,9 @@ function EmailSection(props: EmailSectionProps) {
     reload,
     updateStatus,
   } = props;
+  const visibleEmails =
+  filter === "all" ? emails : emails.filter((e) => e.status === filter);
+
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -469,7 +475,7 @@ function EmailSection(props: EmailSectionProps) {
                 </tr>
               )}
               {!loading &&
-                emails.map((e) => (
+                visibleEmails.map((e) => (
                   <tr
                     key={e.id}
                     style={{
