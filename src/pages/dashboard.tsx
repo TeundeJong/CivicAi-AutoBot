@@ -1,6 +1,6 @@
 // src/pages/dashboard.tsx
 import { useEffect, useState } from "react";
-import Papa from "papaparse"; // ← erbij
+import Papa from "papaparse";
 
 type EmailStatus = "draft" | "approved" | "sent" | "failed" | "declined";
 type LinkedInStatus = "draft" | "approved" | "used" | "declined" | "all";
@@ -46,31 +46,32 @@ export default function DashboardPage() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkFile, setBulkFile] = useState<File | null>(null);
 
-  // Oude handler (nu niet meer gebruikt, maar laten staan voor compat)
-  async function handleCSVUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // ---------- EMAIL LOADERS ----------
 
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const res = await fetch("/api/admin/bulk-csv", {
-      method: "POST",
-      body: formData,
-    });
-
-    const json = await res.json();
-    alert(`Imported ${json.inserted} leads + ${json.jobsCreated} jobs`);
-
-    await loadEmails();
+  async function loadEmails() {
+    setEmailLoading(true);
+    setEmailError(null);
+    try {
+      // altijd ALLE e-mails ophalen
+      const res = await fetch(`/api/admin/emails`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load emails");
+      setEmails(json.emails || []);
+    } catch (err: any) {
+      console.error(err);
+      setEmailError(err.message || "Error");
+    } finally {
+      setEmailLoading(false);
+    }
   }
+
+  // ---------- BULK IMPORT (CSV + textarea) ----------
 
   async function handleBulkImport() {
     // 1) Eerst: CSV-bestand?
     if (bulkFile) {
       setBulkLoading(true);
       try {
-        // CSV inlezen
         const text = await bulkFile.text();
         const parsed = Papa.parse(text, {
           header: true,
@@ -79,23 +80,52 @@ export default function DashboardPage() {
 
         const rows = (parsed.data as any[])
           .map((row) => {
-            const email =
-              row.email ||
-              row.Email ||
-              row["Email"] ||
-              row["Email Address"];
+            if (!row) return { email: null, name: null, company: null };
 
-            const name =
+            const keys = Object.keys(row);
+
+            // ---- EMAIL ----
+            const emailKey =
+              keys.find((k) => k.toLowerCase() === "email") ||
+              keys.find((k) => k.toLowerCase().includes("email"));
+            const email = emailKey ? row[emailKey] : undefined;
+
+            // ---- NAME ----
+            let name =
               row.name ||
               row.Name ||
               row["First Name"] ||
               row["First_Name"] ||
               null;
 
+            if (!name) {
+              const firstKey = keys.find(
+                (k) =>
+                  k.toLowerCase().includes("first") &&
+                  k.toLowerCase().includes("name")
+              );
+              const lastKey = keys.find(
+                (k) =>
+                  k.toLowerCase().includes("last") &&
+                  k.toLowerCase().includes("name")
+              );
+
+              const first = firstKey ? row[firstKey] : "";
+              const last = lastKey ? row[lastKey] : "";
+              const combined = `${first ?? ""} ${last ?? ""}`.trim();
+              name = combined || null;
+            }
+
+            // ---- COMPANY ----
+            const companyKey =
+              keys.find((k) => k.toLowerCase() === "company") ||
+              keys.find((k) => k.toLowerCase().includes("company"));
+
             const company =
               row.company ||
               row.Company ||
               row["Company Name"] ||
+              (companyKey ? row[companyKey] : null) ||
               null;
 
             return { email, name, company };
@@ -103,7 +133,13 @@ export default function DashboardPage() {
           .filter((r) => r.email && String(r.email).includes("@"));
 
         if (!rows.length) {
-          alert("Geen geldige e-mailadressen in de CSV gevonden.");
+          alert(
+            "Geen geldige e-mailadressen in de CSV gevonden. Check of er een kolom met 'Email' of 'Work Email' in staat."
+          );
+          console.log(
+            "Eerste row keys:",
+            Object.keys((parsed.data as any[])[0] || {})
+          );
           return;
         }
 
@@ -130,12 +166,11 @@ export default function DashboardPage() {
         if (inputEl) inputEl.value = "";
         setBulkFile(null);
 
-        // even wachten tot DB klaar is
+        // kleine delay zodat inserts klaar zijn
         await new Promise((r) => setTimeout(r, 250));
 
-        // e-mails opnieuw laden
         await loadEmails();
-        return; // klaar, niet meer naar de textarea-mode gaan
+        return; // niet meer naar textarea-mode
       } catch (err: any) {
         alert(err.message || "Unknown CSV error");
       } finally {
@@ -169,32 +204,12 @@ export default function DashboardPage() {
 
       setBulkInput("");
 
-      // kleine delay zodat inserts klaar zijn
       await new Promise((r) => setTimeout(r, 250));
       await loadEmails();
     } catch (err: any) {
       alert(err.message || "Unknown error");
     } finally {
       setBulkLoading(false);
-    }
-  }
-
-  // ---------- EMAIL LOADERS ----------
-
-  async function loadEmails() {
-    setEmailLoading(true);
-    setEmailError(null);
-    try {
-      // altijd ALLE e-mails ophalen
-      const res = await fetch(`/api/admin/emails`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to load emails");
-      setEmails(json.emails || []);
-    } catch (err: any) {
-      console.error(err);
-      setEmailError(err.message || "Error");
-    } finally {
-      setEmailLoading(false);
     }
   }
 
@@ -609,8 +624,7 @@ function EmailSection(props: EmailSectionProps) {
                     filter === st
                       ? "1px solid #6366f1"
                       : "1px solid #1f2933",
-                  background:
-                    filter === st ? "#111827" : "transparent",
+                  background: filter === st ? "#111827" : "transparent",
                   fontSize: "0.8rem",
                   cursor: "pointer",
                   color: "#e5e7eb",
@@ -778,8 +792,7 @@ function EmailSection(props: EmailSectionProps) {
                         </>
                       )}
 
-                      {(e.status === "approved" ||
-                        e.status === "declined") && (
+                      {(e.status === "approved" || e.status === "declined") && (
                         <button
                           onClick={() => updateStatus(e.id, "draft")}
                           style={{
@@ -856,8 +869,7 @@ function LinkedInSection(props: LinkedInSectionProps) {
               borderRadius: "0.75rem",
               padding: "0.9rem",
               border: "1px solid #111827",
-              background:
-                "linear-gradient(to bottom right,#020617,#020617)",
+              background: "linear-gradient(to bottom right,#020617,#020617)",
             }}
           >
             <div
@@ -891,9 +903,7 @@ function LinkedInSection(props: LinkedInSectionProps) {
         >
           <div>
             <h2 style={{ fontSize: "1.1rem", fontWeight: 600 }}>{title}</h2>
-            <p
-              style={{ fontSize: "0.85rem", color: "#9ca3af" }}
-            >
+            <p style={{ fontSize: "0.85rem", color: "#9ca3af" }}>
               {description}
             </p>
           </div>
