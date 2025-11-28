@@ -52,6 +52,42 @@ export default function DashboardPage() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkFile, setBulkFile] = useState<File | null>(null);
 
+    const [sendingEnabled, setSendingEnabled] = useState<boolean | null>(null);
+  const [sendingToggleLoading, setSendingToggleLoading] = useState(false);
+
+  async function fetchSendingEnabled() {
+    try {
+      const res = await fetch("/api/admin/sending-toggle");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load sending flag");
+      setSendingEnabled(!!json.enabled);
+    } catch (err) {
+      console.error(err);
+      // laat 'm dan gewoon null; UI laat knop dan niet zien
+    }
+  }
+
+  async function handleToggleSending() {
+    if (sendingEnabled === null) return;
+    setSendingToggleLoading(true);
+    try {
+      const res = await fetch("/api/admin/sending-toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !sendingEnabled }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Toggle failed");
+      setSendingEnabled(!!json.enabled);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Kon auto-send niet aanpassen");
+    } finally {
+      setSendingToggleLoading(false);
+    }
+  }
+
+
   // ---------- BULK IMPORT ----------
 
   async function handleBulkImport() {
@@ -306,12 +342,13 @@ alert(
   }
 
   // ---------- EFFECTS ----------
-
   useEffect(() => {
     if (activeTab === "emails") {
       loadEmails();
+      fetchSendingEnabled();
     }
   }, [activeTab]);
+
 
   useEffect(() => {
     if (activeTab === "linkedin_posts") {
@@ -397,28 +434,62 @@ alert(
           </h1>
         </div>
 
-        <nav style={{ display: "flex", gap: "0.75rem", fontSize: "0.9rem" }}>
-          <a
-            href="/"
-            style={{
-              textDecoration: "none",
-              color: "#a5b4fc",
-            }}
+               <div
+          style={{
+            display: "flex",
+            gap: "0.75rem",
+            alignItems: "center",
+          }}
+        >
+          <nav
+            style={{ display: "flex", gap: "0.75rem", fontSize: "0.9rem" }}
           >
-            Home
-          </a>
-          <a
-            href="/dashboard"
-            style={{
-              textDecoration: "none",
-              color: "#e5e7eb",
-              fontWeight: 600,
-            }}
-          >
-            Dashboard
-          </a>
-        </nav>
-      </header>
+            <a
+              href="/"
+              style={{
+                textDecoration: "none",
+                color: "#a5b4fc",
+              }}
+            >
+              Home
+            </a>
+            <a
+              href="/dashboard"
+              style={{
+                textDecoration: "none",
+                color: "#e5e7eb",
+                fontWeight: 600,
+              }}
+            >
+              Dashboard
+            </a>
+          </nav>
+
+          {sendingEnabled !== null && (
+            <button
+              onClick={handleToggleSending}
+              disabled={sendingToggleLoading}
+              style={{
+                padding: "0.3rem 0.9rem",
+                borderRadius: "999px",
+                border: "1px solid " + (sendingEnabled ? "#16a34a" : "#b91c1c"),
+                fontSize: "0.8rem",
+                cursor: "pointer",
+                background: sendingEnabled ? "#022c22" : "#450a0a",
+                color: "#f9fafb",
+                opacity: sendingToggleLoading ? 0.6 : 1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {sendingToggleLoading
+                ? "Saving..."
+                : sendingEnabled
+                ? "Auto-send: ON"
+                : "Auto-send: OFF"}
+            </button>
+          )}
+        </div>
+      </header> 
 
       {/* Tab selector */}
       <div

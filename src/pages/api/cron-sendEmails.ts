@@ -1,15 +1,39 @@
 // src/pages/api/cron-sendEmails.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { sendApprovedBatchOnce } from "../../lib/sendOutboxBatch";
+import { supabaseAdmin, SenderAccount } from "../../lib/supabaseAdmin";
+import { sendEmail } from "../../lib/emailProvider";
 
 export const config = {
   api: { bodyParser: false },
 };
 
+// hoeveel e-mails maximaal per account per cron-run
+const PER_RUN_PER_ACCOUNT = 5;
+
+// zelfde warmup-logica als in jobs.ts
+function calcWarmupLimit(account: SenderAccount, today = new Date()): number {
+  const max = account.max_per_day || 50;
+  if (!account.warmup_start_date) return max;
+
+  const start = new Date(account.warmup_start_date);
+  const diffDays = Math.floor(
+    (today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (diffDays <= 0) return 5;
+  if (diffDays === 1) return 10;
+  if (diffDays === 2) return 20;
+  if (diffDays === 3) return 30;
+  if (diffDays === 4) return 40;
+  if (diffDays === 5) return max;
+  return max;
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
+  // zelfde auth als je oude versie
   const auth = req.headers.authorization;
   const secret = process.env.CRON_SECRET;
 
@@ -18,18 +42,199 @@ export default async function handler(
   }
 
   try {
-    const limit =
-      typeof req.query.limit === "string"
-        ? Number(req.query.limit)
-        : 10;
+    // --- NIEUW: global sending toggle check ---
+    let sendingEnabled = true;
+    try {
+      const { data: settingsRows, error: settingsErr } = await supabaseAdmin
+        .from("autobot_settings")
+        .select("sending_enabled")
+        .eq("id", 1)
+        .limit(1);
 
-    const result = await sendApprovedBatchOnce(
-      Number.isFinite(limit) && limit > 0 ? limit : 10
+      if (settingsErr) {
+        console.warn(
+          "autobot_settings read error, defaulting to enabled",
+          settingsErr
+        );
+      } else if (settingsRows && settingsRows.length > 0) {
+        sendingEnabled = !!settingsRows[0].sending_enabled;
+      }
+    } catch (e) {
+      console.warn(
+        "autobot_settings check failed, defaulting to enabled",
+        e
+      );
+    }
+
+    if (!sendingEnabled) {
+      // pauze aan → niets versturen
+      return res.status(200).json({ sent: 0, reason: "sending_paused" });
+    }
+    // --- EINDE toggle-blok, rest is jouw oude logica ---
+
+    // 1) Active sender accounts ophalen
+    const { data: accounts, error: accErr } = await supabaseAdmin
+      .from("sender_accounts")
+      .select("*")
+      .eq("is_active", true);
+
+    if (accErr) throw accErr;
+
+    const senderList = (accounts || []) as SenderAccount[];
+
+    if (!senderList.length) {
+      return res
+        .status(200)
+        .json({ sent: 0, reason: "no_active_sender_accounts" });
+    }
+
+    const now = new Date();
+    const startOfDay = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+    const startOfDayIso = startOfDay.toISOString();
+
+    // 2) Bereken per account: daily limit, al verstuurd, resterend, capacity voor deze run
+    type Slot = {
+      account: SenderAccount;
+      dailyLimit: number;
+      usedToday: number;
+      remainingToday: number;
+      capacityThisRun: number;
+    };
+
+    const slots: Slot[] = [];
+
+    for (const acc of senderList) {
+      const dailyLimit = calcWarmupLimit(acc, now);
+
+      const { count, error: cntErr } = await supabaseAdmin
+        .from("email_outbox")
+        .select("*", { count: "exact", head: true })
+        .eq("sender_id", acc.id)
+        .gte("created_at", startOfDayIso);
+
+      if (cntErr) throw cntErr;
+
+      const usedToday = count || 0;
+      const remainingToday = Math.max(0, dailyLimit - usedToday);
+
+      const capacityThisRun = Math.min(
+        remainingToday,
+        PER_RUN_PER_ACCOUNT
+      );
+
+      if (capacityThisRun > 0) {
+        slots.push({
+          account: acc,
+          dailyLimit,
+          usedToday,
+          remainingToday,
+          capacityThisRun,
+        });
+      }
+    }
+
+    if (!slots.length) {
+      return res
+        .status(200)
+        .json({ sent: 0, reason: "no_capacity_for_any_account" });
+    }
+
+    const totalToSend = slots.reduce(
+      (sum, s) => sum + s.capacityThisRun,
+      0
     );
 
-    return res.status(200).json(result);
+    if (totalToSend <= 0) {
+      return res
+        .status(200)
+        .json({ sent: 0, reason: "total_capacity_zero" });
+    }
+
+    // 3) Queue ophalen: approved + nog geen sender_id
+    const { data: queue, error: queueErr } = await supabaseAdmin
+      .from("email_outbox")
+      .select("*")
+      .eq("status", "approved")
+      .is("sender_id", null)
+      .order("created_at", { ascending: true })
+      .limit(totalToSend);
+
+    if (queueErr) throw queueErr;
+
+    const drafts = queue || [];
+    if (!drafts.length) {
+      return res
+        .status(200)
+        .json({ sent: 0, reason: "no_approved_emails" });
+    }
+
+    // 4) Mails verdelen over accounts
+    let cursor = 0;
+    let sentGlobal = 0;
+
+    for (const slot of slots) {
+      const slice = drafts.slice(cursor, cursor + slot.capacityThisRun);
+      if (!slice.length) break;
+      cursor += slice.length;
+
+      for (const draft of slice) {
+        try {
+          await sendEmail({
+            to: draft.to_email,
+            subject: draft.subject,
+            body: draft.body,
+            fromEmail: slot.account.email,
+            displayName: slot.account.display_name || "Teun – CivicAi Solutions",
+            smtpOverride: {
+              host: slot.account.smtp_host || undefined,
+              port: slot.account.smtp_port || undefined,
+              user: slot.account.smtp_user || undefined,
+              pass: slot.account.smtp_pass || undefined,
+            },
+          });
+
+          await supabaseAdmin
+            .from("email_outbox")
+            .update({
+              status: "sent",
+              sender_id: slot.account.id,
+              sent_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", draft.id);
+
+          sentGlobal++;
+        } catch (err: any) {
+          console.error("cron-sendEmails send error", err);
+          await supabaseAdmin
+            .from("email_outbox")
+            .update({
+              status: "failed",
+              error: err?.message || String(err),
+              sender_id: slot.account.id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", draft.id);
+        }
+      }
+    }
+
+    return res.status(200).json({
+      sent: sentGlobal,
+      totalQueuedFetched: drafts.length,
+      accountsUsed: slots.map((s) => ({
+        email: s.account.email,
+        capacityThisRun: s.capacityThisRun,
+        remainingTodayBefore: s.remainingToday,
+        dailyLimit: s.dailyLimit,
+      })),
+    });
   } catch (err: any) {
     console.error("cron-sendEmails fatal", err);
-    return res.status(500).json({ error: err.message || "Server error" });
+    return res.status(500).json({ error: err?.message || "Server error" });
   }
 }
