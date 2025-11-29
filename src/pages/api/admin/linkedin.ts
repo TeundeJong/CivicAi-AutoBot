@@ -14,7 +14,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .select("*")
       .eq("type", type)
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(2000);
 
     if (status && status !== "all") {
       query = query.eq("status", status);

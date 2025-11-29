@@ -15,7 +15,7 @@ export default async function handler(
       .from("email_outbox")
       .select("*, leads(name, company), sender_accounts(email)")
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(5000);
 
     if (status !== "all") {
       query = query.eq("status", status);
