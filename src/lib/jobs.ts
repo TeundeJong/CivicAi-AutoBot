@@ -4,13 +4,18 @@ import { supabaseAdmin, MarketingJob, SenderAccount } from "./supabaseAdmin";
 // Types voor de marketing_jobs entries
 export type JobType = "GENERATE_EMAIL";
 
+// We hebben afgesproken: alles in het Engels
 export interface EnqueueJobPayload {
- language: "en",
+  language: "en";
   autoApprove: boolean;
   extraContext?: string;
 }
 
-// Nieuwe job toevoegen
+/**
+ * Idempotent enqueue:
+ * - Maximaal 1 job per (lead_id, type)
+ * - Als je dezelfde CSV 10x uploadt, krijg je nog steeds maar 1 job per lead
+ */
 export async function enqueueJob(params: {
   type: JobType;
   leadId: string;
@@ -20,12 +25,19 @@ export async function enqueueJob(params: {
 
   const { data, error } = await supabaseAdmin
     .from("marketing_jobs")
-    .insert({
-      type,
-      status: "pending",
-      lead_id: leadId,
-      payload,
-    })
+    .upsert(
+      {
+        type,
+        status: "pending",
+        lead_id: leadId,
+        payload,
+      },
+      {
+        // let op: hiervoor moet in Supabase een UNIQUE constraint bestaan
+        // op (lead_id, type), bijv. "marketing_jobs_lead_type_unique"
+        onConflict: "lead_id,type",
+      }
+    )
     .select("*")
     .single();
 
@@ -63,7 +75,7 @@ export async function markJobStatus(
   if (error) throw error;
 }
 
-// Sender accounts ophalen + warmup / limiet berekenen
+// ----------------- warmup / sender selection -----------------
 
 function calcWarmupLimit(
   account: SenderAccount,
@@ -124,7 +136,7 @@ export async function pickSenderForToday() {
     perAccount.push({ account: acc, used, limit });
   }
 
-  // kies account met meeste ruimte over
+  // kies account met de meeste ruimte over
   const available = perAccount
     .filter((a) => a.used < a.limit)
     .sort((a, b) => a.used - b.used);

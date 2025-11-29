@@ -28,10 +28,12 @@ export default async function handler(
       return res.status(400).json({ error: "No rows provided" });
     }
 
+    // 1) Clean + validate
     const leadsToUpsert = rows
       .map((r) => {
         const email = r.email?.trim().toLowerCase();
         if (!email || !email.includes("@")) return null;
+
         return {
           email,
           name: r.name?.trim() || null,
@@ -44,6 +46,7 @@ export default async function handler(
       return res.status(400).json({ error: "No valid emails" });
     }
 
+    // 2) Upsert leads (1 per email)
     const { data: leads, error: upsertErr } = await supabaseAdmin
       .from("leads")
       .upsert(leadsToUpsert, { onConflict: "email" })
@@ -57,6 +60,7 @@ export default async function handler(
     const insertedLeads = leads || [];
     let jobsCreated = 0;
 
+    // 3) Optioneel: jobs aanmaken (max 1 per lead door enqueueJob + unique)
     if (makeJobs) {
       for (const lead of insertedLeads) {
         await enqueueJob({
