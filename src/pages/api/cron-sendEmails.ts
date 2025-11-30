@@ -66,17 +66,23 @@ export default async function handler(
       );
     }
 
-    if (!sendingEnabled) {
-      // pauze aan → niets versturen
-      return res.status(200).json({ sent: 0, reason: "sending_paused" });
-    }
-    // --- EINDE toggle-blok, rest is jouw oude logica ---
+ if (!sendingEnabled) {
+    return res.status(200).json({ sent: 0, reason: "sending_paused" });
+  }
 
-    // 1) Active sender accounts ophalen
-    const { data: accounts, error: accErr } = await supabaseAdmin
-      .from("sender_accounts")
-      .select("*")
-      .eq("is_active", true);
+  const now = new Date();          // <--- DIT BLOK ERBIJ
+  const hour = now.getHours();
+  if (hour < 9 || hour >= 17) {
+    return res.status(200).json({
+      sent: 0,
+      reason: "outside_sending_window",
+    });
+  }
+  // 1) Active sender accounts ophalen
+  const { data: accounts, error: accErr } = await supabaseAdmin
+    .from("sender_accounts")
+    .select("*")
+    .eq("is_active", true);
 
     if (accErr) throw accErr;
 
@@ -88,7 +94,6 @@ export default async function handler(
         .json({ sent: 0, reason: "no_active_sender_accounts" });
     }
 
-    const now = new Date();
     const startOfDay = new Date(
       now.getFullYear(),
       now.getMonth(),

@@ -1,6 +1,6 @@
-// src/pages/api/admin/email-send-batch.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { sendApprovedBatchOnce } from "../../../lib/sendOutboxBatch";
+import { supabaseAdmin } from "../../../lib/supabaseAdmin";
 
 export default async function handler(
   req: NextApiRequest,
@@ -11,8 +11,19 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  // respecteer de global pauzeknop
+  const { data: settingsRows, error: settingsErr } = await supabaseAdmin
+    .from("autobot_settings")
+    .select("sending_enabled")
+    .eq("id", 1)
+    .limit(1);
+
+  if (!settingsErr && settingsRows?.[0]?.sending_enabled === false) {
+    return res.status(403).json({ error: "Sending is paused" });
+  }
+
   try {
-    const limit = Number(req.body?.limit || 50); // bv. 50 max per klik
+    const limit = Number(req.body?.limit || 50);
     const result = await sendApprovedBatchOnce(
       Number.isFinite(limit) && limit > 0 ? limit : 50
     );
