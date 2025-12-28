@@ -70,13 +70,24 @@ export default async function handler(
     return res.status(200).json({ sent: 0, reason: "sending_paused" });
   }
 
-  const now = new Date();          // <--- DIT BLOK ERBIJ
-  const hour = now.getHours();
-  if (hour < 9 || hour >= 17) {
-    return res.status(200).json({
-      sent: 0,
-      reason: "outside_sending_window",
-    });
+  const now = new Date();
+  // Optioneel sending window via env vars (HH in 0-23). Als niet gezet: 24/7 versturen.
+  const winStartRaw = process.env.SENDING_WINDOW_START_HOUR;
+  const winEndRaw = process.env.SENDING_WINDOW_END_HOUR;
+  if (winStartRaw != null && winEndRaw != null) {
+    const winStart = Number(winStartRaw);
+    const winEnd = Number(winEndRaw);
+    if (Number.isFinite(winStart) && Number.isFinite(winEnd)) {
+      const hour = now.getHours();
+      // zelfde semantics als eerder: start inclusief, end exclusief
+      if (hour < winStart || hour >= winEnd) {
+        return res.status(200).json({
+          sent: 0,
+          reason: "outside_sending_window",
+          window: { startHour: winStart, endHour: winEnd },
+        });
+      }
+    }
   }
   // 1) Active sender accounts ophalen
   const { data: accounts, error: accErr } = await supabaseAdmin
@@ -92,6 +103,42 @@ export default async function handler(
       return res
         .status(200)
         .json({ sent: 0, reason: "no_active_sender_accounts" });
+    }
+
+    // Warmup start automatisch zetten op het moment dat je echt gaat versturen.
+    // (Alleen voor accounts waar warmup_start_date nog leeg is.)
+    const accountsMissingWarmup = senderList.filter(
+      (a) => !a.warmup_start_date
+    );
+    if (accountsMissingWarmup.length > 0) {
+      const { count: approvedCount, error: approvedCountErr } =
+        await supabaseAdmin
+          .from("email_outbox")
+          .select("*", { count: "exact", head: true })
+          .eq("status", "approved")
+          .is("sender_id", null);
+
+      if (approvedCountErr) throw approvedCountErr;
+
+      if ((approvedCount || 0) > 0) {
+        const warmupStartIso = now.toISOString();
+        const ids = accountsMissingWarmup.map((a) => a.id);
+
+        const { error: warmupSetErr } = await supabaseAdmin
+          .from("sender_accounts")
+          .update({ warmup_start_date: warmupStartIso })
+          .in("id", ids)
+          .is("warmup_start_date", null);
+
+        if (warmupSetErr) throw warmupSetErr;
+
+        // update local copies so calcWarmupLimit uses the fresh date in this run
+        for (const a of senderList) {
+          if (!a.warmup_start_date && ids.includes(a.id)) {
+            a.warmup_start_date = warmupStartIso;
+          }
+        }
+      }
     }
 
     const startOfDay = new Date(
@@ -119,7 +166,8 @@ export default async function handler(
         .from("email_outbox")
         .select("*", { count: "exact", head: true })
         .eq("sender_id", acc.id)
-        .gte("created_at", startOfDayIso);
+        .eq("status", "sent")
+        .gte("sent_at", startOfDayIso);
 
       if (cntErr) throw cntErr;
 

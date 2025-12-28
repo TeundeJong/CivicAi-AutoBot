@@ -195,6 +195,8 @@ export default function DashboardPage() {
             lines,
             makeJobs: true,
             emailSnippet,
+            emailTemplateEN,
+            emailTemplateNL,
           }),
         });
 
@@ -240,6 +242,8 @@ alert(
           lines: bulkInput,
         makeJobs: true,
         emailSnippet,
+        emailTemplateEN,
+        emailTemplateNL,
         }),
       });
 
@@ -357,6 +361,17 @@ alert(
     try {
       const saved = window.localStorage.getItem("autobot_email_snippet") || "";
       if (saved) setEmailSnippet(saved);
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const savedEN = window.localStorage.getItem("autobot_email_template_en") || "";
+      const savedNL = window.localStorage.getItem("autobot_email_template_nl") || "";
+      if (savedEN) setEmailTemplateEN(savedEN);
+      if (savedNL) setEmailTemplateNL(savedNL);
     } catch (e) {
       // ignore
     }
@@ -623,7 +638,90 @@ alert(
               "Example: Focus on EU/UK real estate + construction. Keep it short and add a soft CTA."
             }
           />
+        
+        <div style={{ marginBottom: "0.5rem" }}>
+          <div
+            style={{
+              fontSize: "0.75rem",
+              color: "#9ca3af",
+              marginBottom: "0.25rem",
+            }}
+          >
+            Optional templates (NEW drafts only) — bot auto-picks NL for .nl emails, EN otherwise
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
+            <div>
+              <div style={{ fontSize: "0.75rem", color: "#9ca3af", marginBottom: "0.25rem" }}>
+                EN template
+              </div>
+              <textarea
+                value={emailTemplateEN}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setEmailTemplateEN(v);
+                  try {
+                    window.localStorage.setItem("autobot_email_template_en", v);
+                  } catch (err) {
+                    // ignore
+                  }
+                }}
+                rows={6}
+                style={{
+                  width: "100%",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #1f2937",
+                  background: "#020617",
+                  color: "#e5e7eb",
+                  padding: "0.5rem",
+                  fontSize: "0.85rem",
+                  resize: "vertical",
+                }}
+                placeholder={
+                  "Subject: Quick contract scan for {{company}}\n\nHi {{name}},\n\n...\n\nBest regards,\nTeun – CivicAi Solutions"
+                }
+              />
+            </div>
+
+            <div>
+              <div style={{ fontSize: "0.75rem", color: "#9ca3af", marginBottom: "0.25rem" }}>
+                NL template
+              </div>
+              <textarea
+                value={emailTemplateNL}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setEmailTemplateNL(v);
+                  try {
+                    window.localStorage.setItem("autobot_email_template_nl", v);
+                  } catch (err) {
+                    // ignore
+                  }
+                }}
+                rows={6}
+                style={{
+                  width: "100%",
+                  borderRadius: "0.5rem",
+                  border: "1px solid #1f2937",
+                  background: "#020617",
+                  color: "#e5e7eb",
+                  padding: "0.5rem",
+                  fontSize: "0.85rem",
+                  resize: "vertical",
+                }}
+                placeholder={
+                  "Onderwerp: Snelle contractscan voor {{company}}\n\nHoi {{name}},\n\n...\n\nMet vriendelijke groet,\nTeun – CivicAi Solutions"
+                }
+              />
+            </div>
+          </div>
+
+          <div style={{ fontSize: "0.75rem", color: "#64748b", marginTop: "0.35rem" }}>
+            Placeholders: <code>{"{{name}}"}</code> <code>{"{{company}}"}</code> <code>{"{{email}}"}</code>. First non-empty line becomes the subject.
+          </div>
         </div>
+
+</div>
 
         <textarea
           value={bulkInput}

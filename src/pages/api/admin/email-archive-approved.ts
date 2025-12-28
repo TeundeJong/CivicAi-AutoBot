@@ -21,9 +21,14 @@ export default async function handler(
     const stamp = now.toISOString().replace(/[:.]/g, "-");
     const filename = `approved-emails-${stamp}.csv`;
 
+    // IMPORTANT:
+    // Avoid relying on implicit PostgREST relationship selects (e.g. leads(...)).
+    // Some Supabase projects don't expose the relation name as "leads" and will
+    // throw: "Could not find a relationship between 'email_outbox' and 'leads'".
+    // We fetch lead_id first, then join in a second query.
     const { data, error } = await supabaseAdmin
       .from("email_outbox")
-      .select("id,to_email,subject,body,status,created_at,leads(name,company)")
+      .select("id,lead_id,to_email,subject,body,status,created_at")
       .eq("status", "approved")
       .order("created_at", { ascending: false })
       .limit(5000);
@@ -53,9 +58,27 @@ export default async function handler(
 
     const lines: string[] = [];
     lines.push(header.join(","));
+    // Fetch leads (best-effort). If lead records are missing, we just export blanks.
+    const leadIds = Array.from(
+      new Set(rows.map((r) => r.lead_id).filter(Boolean))
+    );
+    let leadById: Record<string, { name: string | null; company: string | null }> = {};
+    if (leadIds.length) {
+      const { data: leads, error: leadErr } = await supabaseAdmin
+        .from("leads")
+        .select("id,name,company")
+        .in("id", leadIds);
+      if (!leadErr && Array.isArray(leads)) {
+        for (const l of leads as any[]) {
+          if (l?.id) leadById[l.id] = { name: l.name ?? null, company: l.company ?? null };
+        }
+      }
+    }
+
     for (const r of rows) {
-      const name = r.leads?.name ?? "";
-      const company = r.leads?.company ?? "";
+      const lead = r.lead_id ? leadById[r.lead_id] : undefined;
+      const name = lead?.name ?? "";
+      const company = lead?.company ?? "";
       lines.push(
         [
           esc(name),

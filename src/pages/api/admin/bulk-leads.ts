@@ -45,7 +45,62 @@ function parseLines(lines: string): ParsedRow[] {
       (row): row is ParsedRow =>
         !!row && !!row.email && row.email.includes("@")
     );
+
 }
+
+/**
+ * Infer a simple language choice from the lead email.
+ * - .nl domains -> nl
+ * - everything else -> en
+ * (Patch-only: we don't have a country field in leads yet.)
+ */
+function inferLanguageFromEmail(email: string): "nl" | "en" {
+  const lower = (email || "").toLowerCase().trim();
+  // Match domain TLD .nl (e.g. name@company.nl)
+  if (/@[^@]+\.nl\b/.test(lower)) return "nl";
+  return "en";
+}
+
+function renderTemplate(
+  templateText: string,
+  vars: { name: string; company: string; email: string; snippet?: string }
+): { subject: string; body: string } {
+  const t = (templateText || "").replace(/\r\n/g, "\n").trim();
+  const lines = t.split("\n");
+
+  // first non-empty line is subject
+  const firstNonEmptyIndex = lines.findIndex((l) => l.trim().length > 0);
+  const subjectLine =
+    firstNonEmptyIndex >= 0 ? lines[firstNonEmptyIndex].trim() : "";
+  const subject = subjectLine
+    .replace(/^(onderwerp|subject)\s*[:\-]\s*/i, "")
+    .trim();
+
+  const bodyLines =
+    firstNonEmptyIndex >= 0 ? lines.slice(firstNonEmptyIndex + 1) : [];
+  let body = bodyLines.join("\n").trim();
+
+  const rep = (s: string) =>
+    s
+      .replace(/\{\{\s*name\s*\}\}/gi, vars.name || "")
+      .replace(/\{\{\s*company\s*\}\}/gi, vars.company || "")
+      .replace(/\{\{\s*email\s*\}\}/gi, vars.email || "");
+
+  const cleanedSubject = rep(subject) || subject || "ContractGuard AI";
+  body = rep(body);
+
+  // Optional snippet appended (keeps existing personalization intact)
+  const snippet = (vars.snippet || "").trim();
+  if (snippet.length > 0) {
+    body = body.length > 0 ? `${body}\n\n${snippet}` : snippet;
+  }
+
+  return {
+    subject: cleanedSubject,
+    body,
+  };
+}
+
 
 export default async function handler(
   req: NextApiRequest,
@@ -57,9 +112,11 @@ export default async function handler(
   }
 
   try {
-    const { lines, emailSnippet } = (req.body || {}) as {
+    const { lines, emailSnippet, emailTemplateEN, emailTemplateNL } = (req.body || {}) as {
       lines?: string;
       emailSnippet?: string;
+      emailTemplateEN?: string;
+      emailTemplateNL?: string;
     };
 
     if (!lines || !lines.trim()) {
@@ -100,19 +157,51 @@ export default async function handler(
 await Promise.all(
   insertedLeads.map(async (lead) => {
     try {
-      const snippet =
+            const snippet =
         typeof emailSnippet === "string" && emailSnippet.trim().length > 0
           ? emailSnippet.trim()
           : "";
 
-      const { subject, body } = await generateSalesEmail({
-        language: "en", // alles Engels
-        leadName: lead.name,
-        company: lead.company,
-        extraContext:
-          "First contact for ContractGuard AI." +
-          (snippet ? `\n\nAdditional context to include:\n${snippet}` : ""),
-      });
+      const lang = inferLanguageFromEmail(lead.email);
+
+      const templateText =
+        lang === "nl"
+          ? typeof emailTemplateNL === "string"
+            ? emailTemplateNL
+            : ""
+          : typeof emailTemplateEN === "string"
+          ? emailTemplateEN
+          : "";
+
+      let subject = "";
+      let body = "";
+
+      if (templateText && templateText.trim().length > 0) {
+        // Deterministic template mode (safer, no AI surprises)
+        const rendered = renderTemplate(templateText, {
+          name: lead.name || "",
+          company: lead.company || "",
+          email: lead.email,
+          snippet,
+        });
+        subject = rendered.subject;
+        body = rendered.body;
+      } else {
+        // Fallback: existing AI generator
+        const ai = await generateSalesEmail({
+          language: lang,
+          leadName: lead.name,
+          company: lead.company,
+          extraContext:
+            "First contact for ContractGuard AI." +
+            (snippet ? `
+
+Additional context to include:
+${snippet}` : ""),
+        });
+        subject = ai.subject;
+        body = ai.body;
+      }
 
       const { error: outErr } = await supabaseAdmin
         .from("email_outbox")
