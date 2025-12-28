@@ -66,11 +66,11 @@ export default async function handler(
     if (leadIds.length) {
       const { data: leads, error: leadErr } = await supabaseAdmin
         .from("leads")
-        .select("*")
+        .select("id,name,company")
         .in("id", leadIds);
       if (!leadErr && Array.isArray(leads)) {
         for (const l of leads as any[]) {
-          if (l?.id) leadById[l.id] = { name: (l.name ?? l.full_name ?? l.display_name ?? l.contact_name ?? null), company: (l.company ?? l.company_name ?? l.organisation ?? l.org_name ?? null) };
+          if (l?.id) leadById[l.id] = { name: l.name ?? null, company: l.company ?? null };
         }
       }
     }
@@ -95,6 +95,9 @@ export default async function handler(
 
     // --- Move approved -> archived ---
     const ids = rows.map((r) => r.id).filter(Boolean);
+    // Some deployments don't have an `updated_at` column on `email_outbox`.
+    // Including it makes PostgREST return a 400 (Bad Request).
+    // Keep this PATCH-only: update only the status.
     const { error: updErr } = await supabaseAdmin
       .from("email_outbox")
       .update({ status: "archived" })
