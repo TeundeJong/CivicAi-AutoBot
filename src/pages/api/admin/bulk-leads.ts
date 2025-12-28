@@ -57,7 +57,10 @@ export default async function handler(
   }
 
   try {
-    const { lines } = (req.body || {}) as { lines?: string };
+    const { lines, emailSnippet } = (req.body || {}) as {
+      lines?: string;
+      emailSnippet?: string;
+    };
 
     if (!lines || !lines.trim()) {
       return res.status(400).json({ error: "No lines provided" });
@@ -97,11 +100,18 @@ export default async function handler(
 await Promise.all(
   insertedLeads.map(async (lead) => {
     try {
+      const snippet =
+        typeof emailSnippet === "string" && emailSnippet.trim().length > 0
+          ? emailSnippet.trim()
+          : "";
+
       const { subject, body } = await generateSalesEmail({
         language: "en", // alles Engels
         leadName: lead.name,
         company: lead.company,
-        extraContext: "First contact for ContractGuard AI.",
+        extraContext:
+          "First contact for ContractGuard AI." +
+          (snippet ? `\n\nAdditional context to include:\n${snippet}` : ""),
       });
 
       const { error: outErr } = await supabaseAdmin

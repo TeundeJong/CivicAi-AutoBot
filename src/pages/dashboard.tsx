@@ -2,7 +2,13 @@
 import { useEffect, useState } from "react";
 import Papa from "papaparse";
 
-type EmailStatus = "draft" | "approved" | "sent" | "failed" | "declined";
+type EmailStatus =
+  | "draft"
+  | "approved"
+  | "sent"
+  | "failed"
+  | "declined"
+  | "archived";
 type LinkedInStatus = "draft" | "approved" | "used" | "declined" | "all";
 type Tab = "emails" | "linkedin_posts" | "linkedin_dms";
 
@@ -51,6 +57,9 @@ export default function DashboardPage() {
   const [bulkInput, setBulkInput] = useState("");
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkFile, setBulkFile] = useState<File | null>(null);
+
+  // Optional extra snippet that will be sent with bulk lead imports (applies to NEW emails)
+  const [emailSnippet, setEmailSnippet] = useState("");
 
     const [sendingEnabled, setSendingEnabled] = useState<boolean | null>(null);
   const [sendingToggleLoading, setSendingToggleLoading] = useState(false);
@@ -185,6 +194,7 @@ export default function DashboardPage() {
           body: JSON.stringify({
             lines,
             makeJobs: true,
+            emailSnippet,
           }),
         });
 
@@ -228,7 +238,8 @@ alert(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           lines: bulkInput,
-          makeJobs: true,
+        makeJobs: true,
+        emailSnippet,
         }),
       });
 
@@ -342,6 +353,15 @@ alert(
   }
 
   // ---------- EFFECTS ----------
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("autobot_email_snippet") || "";
+      if (saved) setEmailSnippet(saved);
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
     if (activeTab === "emails") {
       loadEmails();
@@ -566,6 +586,44 @@ alert(
           <code>email@domain.com</code>. The bot will create email drafts
           and LinkedIn DM drafts for each lead.
         </p>
+
+        <div style={{ marginBottom: "0.5rem" }}>
+          <div
+            style={{
+              fontSize: "0.75rem",
+              color: "#9ca3af",
+              marginBottom: "0.25rem",
+            }}
+          >
+            Optional email snippet (applies to NEW drafts created from this import)
+          </div>
+          <textarea
+            value={emailSnippet}
+            onChange={(e) => {
+              const v = e.target.value;
+              setEmailSnippet(v);
+              try {
+                window.localStorage.setItem("autobot_email_snippet", v);
+              } catch (err) {
+                // ignore
+              }
+            }}
+            rows={3}
+            style={{
+              width: "100%",
+              borderRadius: "0.5rem",
+              border: "1px solid #1f2937",
+              background: "#020617",
+              color: "#e5e7eb",
+              padding: "0.5rem",
+              fontSize: "0.85rem",
+              resize: "vertical",
+            }}
+            placeholder={
+              "Example: Focus on EU/UK real estate + construction. Keep it short and add a soft CTA."
+            }
+          />
+        </div>
 
         <textarea
           value={bulkInput}
@@ -844,6 +902,8 @@ function EmailSection(props: EmailSectionProps) {
     updateStatus,
     onOpenEmail,
   } = props;
+
+  const [bulkAppendText, setBulkAppendText] = useState("");
   async function handleBulkStatus(
     status: EmailStatus,
     limit?: number
@@ -909,6 +969,69 @@ function EmailSection(props: EmailSectionProps) {
     }
   }
 
+  async function handleArchiveApproved() {
+    try {
+      const res = await fetch("/api/admin/email-archive-approved", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Archive failed");
+
+      // Download CSV snapshot (so you can store it separately)
+      if (json.csv && json.filename) {
+        const blob = new Blob([json.csv], { type: "text/csv;charset=utf-8" });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = json.filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      }
+
+      alert(`Archived ${json.archived || 0} approved emails.`);
+      await reload();
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Archive error");
+    }
+  }
+
+  async function handleBulkAppend() {
+    const text = bulkAppendText.trim();
+    if (!text) {
+      alert("Plak eerst de tekst die je aan alle e-mails wilt toevoegen.");
+      return;
+    }
+
+    const source =
+      filter === "all" ? emails : emails.filter((e) => e.status === filter);
+    const ids = source.map((e) => e.id);
+
+    if (!ids.length) {
+      alert("Geen e-mails in deze selectie.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/admin/email-bulk-append", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, appendText: text }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Bulk append failed");
+      setBulkAppendText("");
+      await reload();
+      alert(`Updated ${json.updated || 0} emails.`);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Bulk append error");
+    }
+  }
+
   const visibleEmails =
     filter === "all" ? emails : emails.filter((e) => e.status === filter);
 
@@ -922,7 +1045,7 @@ function EmailSection(props: EmailSectionProps) {
           gap: "0.75rem",
         }}
       >
-        {["draft", "approved", "sent", "failed", "declined"].map((st) => (
+        {["draft", "approved", "archived", "sent", "failed", "declined"].map((st) => (
           <div
             key={st}
             style={{
@@ -967,7 +1090,15 @@ function EmailSection(props: EmailSectionProps) {
         >
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
             {(
-              ["all", "draft", "approved", "sent", "failed", "declined"] as const
+              [
+                "all",
+                "draft",
+                "approved",
+                "archived",
+                "sent",
+                "failed",
+                "declined",
+              ] as const
             ).map((st) => (
               <button
                 key={st}
@@ -1060,6 +1191,21 @@ function EmailSection(props: EmailSectionProps) {
             </div>
 
             <button
+              onClick={handleArchiveApproved}
+              style={{
+                padding: "0.3rem 0.9rem",
+                borderRadius: "999px",
+                border: "1px solid #f59e0b",
+                fontSize: "0.8rem",
+                cursor: "pointer",
+                background: "transparent",
+                color: "#fde68a",
+              }}
+            >
+              Archive approved (download CSV)
+            </button>
+
+            <button
               onClick={handleSendBatchNow}
               style={{
                 padding: "0.3rem 0.9rem",
@@ -1089,6 +1235,52 @@ function EmailSection(props: EmailSectionProps) {
               Refresh
             </button>
           </div>
+        </div>
+
+        {/* Bulk append text to bodies */}
+        <div
+          style={{
+            borderRadius: "0.75rem",
+            border: "1px solid #1f2937",
+            background: "#020617",
+            padding: "0.75rem",
+            marginBottom: "0.75rem",
+          }}
+        >
+          <div style={{ fontSize: "0.8rem", color: "#9ca3af", marginBottom: "0.35rem" }}>
+            Add a snippet to all visible emails (current filter)
+          </div>
+          <textarea
+            value={bulkAppendText}
+            onChange={(e) => setBulkAppendText(e.target.value)}
+            rows={3}
+            style={{
+              width: "100%",
+              borderRadius: "0.5rem",
+              border: "1px solid #1f2937",
+              background: "#020617",
+              color: "#e5e7eb",
+              padding: "0.5rem",
+              fontSize: "0.85rem",
+              resize: "vertical",
+              marginBottom: "0.5rem",
+            }}
+            placeholder="Example: Short CTA + link, or a PS about EU/UK focus."
+          />
+          <button
+            onClick={handleBulkAppend}
+            style={{
+              padding: "0.3rem 0.9rem",
+              borderRadius: "999px",
+              border: "1px solid #4b5563",
+              fontSize: "0.8rem",
+              cursor: "pointer",
+              background: "#111827",
+              color: "#e5e7eb",
+            }}
+          >
+            Append to visible
+          </button>
         </div>
 
 
@@ -1277,7 +1469,8 @@ function EmailSection(props: EmailSectionProps) {
                       )}
 
                       {(e.status === "approved" ||
-                        e.status === "declined") && (
+                        e.status === "declined" ||
+                        e.status === "archived") && (
                         <button
                           onClick={() => updateStatus(e.id, "draft")}
                           style={{

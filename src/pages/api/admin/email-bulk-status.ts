@@ -2,7 +2,13 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabaseAdmin";
 
-type EmailStatus = "draft" | "approved" | "sent" | "failed" | "declined";
+type EmailStatus =
+  | "draft"
+  | "approved"
+  | "sent"
+  | "failed"
+  | "declined"
+  | "archived";
 
 export default async function handler(
   req: NextApiRequest,
@@ -28,6 +34,7 @@ export default async function handler(
       "sent",
       "failed",
       "declined",
+      "archived",
     ];
     if (!allowed.includes(status)) {
       return res.status(400).json({ error: "Invalid status" });

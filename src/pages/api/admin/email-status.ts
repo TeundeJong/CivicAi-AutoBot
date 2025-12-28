@@ -15,7 +15,7 @@ export default async function handler(
       return res.status(400).json({ error: "id en status verplicht" });
     }
 
-    if (!["draft", "approved", "declined"].includes(status)) {
+    if (!["draft", "approved", "declined", "archived"].includes(status)) {
       return res.status(400).json({ error: "Ongeldige status" });
     }
 
