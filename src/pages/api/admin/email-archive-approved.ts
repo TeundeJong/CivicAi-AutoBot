@@ -97,7 +97,8 @@ export default async function handler(
     const ids = rows.map((r) => r.id).filter(Boolean);
     const { error: updErr } = await supabaseAdmin
       .from("email_outbox")
-      .update({ status: "archived", updated_at: new Date().toISOString() })
+    .update({ status: "archived" })
+
       .in("id", ids);
 
     if (updErr) throw updErr;
