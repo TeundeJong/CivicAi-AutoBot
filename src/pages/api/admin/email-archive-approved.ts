@@ -66,11 +66,11 @@ export default async function handler(
     if (leadIds.length) {
       const { data: leads, error: leadErr } = await supabaseAdmin
         .from("leads")
-        .select("id,name,company")
+        .select("*")
         .in("id", leadIds);
       if (!leadErr && Array.isArray(leads)) {
         for (const l of leads as any[]) {
-          if (l?.id) leadById[l.id] = { name: l.name ?? null, company: l.company ?? null };
+          if (l?.id) leadById[l.id] = { name: (l.name ?? l.full_name ?? l.display_name ?? l.contact_name ?? null), company: (l.company ?? l.company_name ?? l.organisation ?? l.org_name ?? null) };
         }
       }
     }
@@ -97,7 +97,7 @@ export default async function handler(
     const ids = rows.map((r) => r.id).filter(Boolean);
     const { error: updErr } = await supabaseAdmin
       .from("email_outbox")
-      .update({ status: "archived", updated_at: new Date().toISOString() })
+      .update({ status: "archived" })
       .in("id", ids);
 
     if (updErr) throw updErr;
