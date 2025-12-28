@@ -61,6 +61,10 @@ export default function DashboardPage() {
   // Optional extra snippet that will be sent with bulk lead imports (applies to NEW emails)
   const [emailSnippet, setEmailSnippet] = useState("");
 
+  // Templates (EN/NL) for auto language selection during draft generation
+  const [emailTemplateEN, setEmailTemplateEN] = useState("");
+  const [emailTemplateNL, setEmailTemplateNL] = useState("");
+
     const [sendingEnabled, setSendingEnabled] = useState<boolean | null>(null);
   const [sendingToggleLoading, setSendingToggleLoading] = useState(false);
 
