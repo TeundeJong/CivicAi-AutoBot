@@ -10,3 +10,4 @@ yarn-error.log*
 pnpm-lock.yaml
 package-lock.json
 dist
+README.md
